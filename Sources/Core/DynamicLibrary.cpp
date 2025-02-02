@@ -85,6 +85,7 @@ namespace spades {
 #include "DynamicLibrary.h"
 #include "Exception.h"
 #include <dlfcn.h>
+#include <string.h>
 
 namespace spades {
 	DynamicLibrary::DynamicLibrary(const char *fn) {

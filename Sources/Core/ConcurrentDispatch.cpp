@@ -39,6 +39,8 @@
 #endif
 #endif
 
+#include <string.h>
+
 #include "ConcurrentDispatch.h"
 #include "Debug.h"
 #include "Exception.h"
