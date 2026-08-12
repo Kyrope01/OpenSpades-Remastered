@@ -551,7 +551,15 @@ namespace spades {
 		void GLRenderer::AddLight(const client::DynamicLightParam &light) {
 			if (!settings.r_dlights && !light.ignoreGlobalDisable)
 				return;
-			if (!SphereFrustrumCull(light.origin, light.radius))
+
+			Vector3 cullOrigin = light.origin;
+			float cullRadius = light.radius;
+			if (light.type == client::DynamicLightTypeLinear) {
+				Vector3 halfSegment = (light.point2 - light.origin) * 0.5f;
+				cullOrigin += halfSegment;
+				cullRadius += halfSegment.GetLength();
+			}
+			if (!SphereFrustrumCull(cullOrigin, cullRadius))
 				return;
 			EnsureInitialized();
 			EnsureSceneStarted();

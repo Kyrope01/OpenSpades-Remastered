@@ -18,10 +18,40 @@
 
  */
 
+#include <algorithm>
+#include <cmath>
+
 #include "GLDynamicLight.h"
 
 namespace spades {
 	namespace draw {
+		namespace {
+			bool SegmentIntersectsAABB(Vector3 start, Vector3 end, const AABB3 &box) {
+				Vector3 direction = end - start;
+				float minT = 0.f;
+				float maxT = 1.f;
+
+				auto intersectAxis = [&](float axisStart, float axisDirection, float axisMin,
+				                         float axisMax) {
+					if (fabsf(axisDirection) < 1.e-6f) {
+						return axisStart >= axisMin && axisStart <= axisMax;
+					}
+
+					float t1 = (axisMin - axisStart) / axisDirection;
+					float t2 = (axisMax - axisStart) / axisDirection;
+					if (t1 > t2)
+						std::swap(t1, t2);
+					minT = std::max(minT, t1);
+					maxT = std::min(maxT, t2);
+					return minT <= maxT;
+				};
+
+				return intersectAxis(start.x, direction.x, box.min.x, box.max.x) &&
+				       intersectAxis(start.y, direction.y, box.min.y, box.max.y) &&
+				       intersectAxis(start.z, direction.z, box.min.z, box.max.z);
+			}
+		} // namespace
+
 		GLDynamicLight::GLDynamicLight(const client::DynamicLightParam &param) : param(param) {
 
 			if (param.type == client::DynamicLightTypeSpotlight) {
@@ -61,6 +91,10 @@ namespace spades {
 					clipPlanes[i] = Plane3::PlaneWithPointOnPlane(param.origin, planeN[i]);
 				}
 			}
+
+			if (param.type == client::DynamicLightTypeLinear) {
+				poweredLength = (param.point2 - param.origin).GetPoweredLength();
+			}
 		}
 
 		bool GLDynamicLight::Cull(const spades::AABB3 &box) const {
@@ -73,7 +107,12 @@ namespace spades {
 			}
 
 			const client::DynamicLightParam &param = GetParam();
-			return box.Inflate(param.radius) && param.origin;
+			AABB3 inflatedBox = box.Inflate(param.radius);
+			if (param.type == client::DynamicLightTypeLinear) {
+				return SegmentIntersectsAABB(param.origin, param.point2, inflatedBox);
+			}
+
+			return inflatedBox && param.origin;
 		}
 
 		bool GLDynamicLight::SphereCull(const spades::Vector3 &center, float radius) const {
@@ -85,6 +124,16 @@ namespace spades {
 						return false;
 					}
 				}
+			} else if (param.type == client::DynamicLightTypeLinear) {
+				Vector3 segment = param.point2 - param.origin;
+				float t = 0.f;
+				if (poweredLength > 0.f) {
+					t = Vector3::Dot(center - param.origin, segment) / poweredLength;
+					t = std::min(1.f, std::max(0.f, t));
+				}
+				Vector3 closestPoint = param.origin + segment * t;
+				float maxDistance = radius + param.radius;
+				return (center - closestPoint).GetPoweredLength() < maxDistance * maxDistance;
 			}
 
 			float maxDistance = radius + param.radius;

@@ -49,6 +49,7 @@ namespace spades {
 
 		void Tracer::Render3D() {
 			IRenderer *r = client->GetRenderer();
+			bool isSoftwareRenderer = dynamic_cast<draw::SWRenderer *>(r) != NULL;
 
 			// Clip the light and the visible streak to the part of the bullet path
 			// that is currently on screen. This prevents a tracer from lighting its
@@ -64,17 +65,26 @@ namespace spades {
 			if ((int)cg_glowingTracers != 0 && lightIntensity > 0.f) {
 				float streakLength = visibleEndDist - visibleStartDist;
 
+				Vector3 lightStart = startPos + dir * visibleStartDist;
+				Vector3 lightEnd = startPos + dir * visibleEndDist;
+
 				DynamicLightParam light;
-				light.type = DynamicLightTypePoint;
-				light.origin =
-				  startPos + dir * ((visibleStartDist + visibleEndDist) * 0.5f);
+				if (isSoftwareRenderer) {
+					// The software renderer supports point lights only.
+					light.type = DynamicLightTypePoint;
+					light.origin = (lightStart + lightEnd) * 0.5f;
+				} else {
+					light.type = DynamicLightTypeLinear;
+					light.origin = lightStart;
+					light.point2 = lightEnd;
+				}
 				light.radius = std::min(10.f, std::max(5.f, streakLength * 0.75f + 2.f));
 				light.color = MakeVector3(2.4f, .9f, .25f) * lightIntensity;
 				light.ignoreGlobalDisable = true;
 				r->AddLight(light);
 			}
 
-			if (dynamic_cast<draw::SWRenderer *>(r)) {
+			if (isSoftwareRenderer) {
 				// SWRenderer doesn't support long sprites (yet)
 				Vector3 pos1 = startPos + dir * visibleStartDist;
 				Vector3 pos2 = startPos + dir * visibleEndDist;

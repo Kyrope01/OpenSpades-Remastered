@@ -33,6 +33,9 @@ namespace spades {
 			/** World-space clip planes (spotlight only) */
 			std::array<Plane3, 4> clipPlanes;
 
+			/** Squared segment length (linear light only). */
+			float poweredLength = 0.f;
+
 		public:
 			GLDynamicLight(const client::DynamicLightParam &param);
 			const client::DynamicLightParam &GetParam() const { return param; }
