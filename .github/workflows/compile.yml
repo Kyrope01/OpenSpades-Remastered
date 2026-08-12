@@ -126,7 +126,6 @@ jobs:
           INSTRUCTIONS
 
           (cd package && zip -9 -r "../$ARCHIVE_NAME.zip" "$ARCHIVE_NAME")
-          sha256sum "$ARCHIVE_NAME.zip" > "$ARCHIVE_NAME.zip.sha256"
 
           unzip -t "$ARCHIVE_NAME.zip"
           ldd "$PACKAGE_DIR/openspades" | tee linked-libraries.txt
@@ -141,6 +140,5 @@ jobs:
         run: |
           gh release upload "$RELEASE_TAG" \
             "$ARCHIVE_NAME.zip" \
-            "$ARCHIVE_NAME.zip.sha256" \
             --clobber \
             --repo "$GITHUB_REPOSITORY"
