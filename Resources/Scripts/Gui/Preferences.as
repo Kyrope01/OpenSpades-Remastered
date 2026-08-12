@@ -633,6 +633,7 @@ namespace spades {
             layouter.AddToggleField(_Tr("Preferences", "Ejecting Brass"), "cg_ejectBrass");
             layouter.AddToggleField(_Tr("Preferences", "Ragdoll"), "cg_ragdoll");
             layouter.AddToggleField(_Tr("Preferences", "Animations"), "cg_animations");
+            layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
             layouter.AddChoiceField(_Tr("Preferences", "Camera Shake"), "cg_shake",
                                     array<string> = {_Tr("Preferences", "MORE"),
                                                      _Tr("Preferences", "NORMAL"),
@@ -654,7 +655,7 @@ namespace spades {
             layouter.AddToggleField(_Tr("Preferences", "Server Alert"), "cg_serverAlert");
 
             layouter.AddHeading(_Tr("Preferences", "Misc"));
-            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 90, 1,
+            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
                                     ConfigNumberFormatter(0, " deg"));
             layouter.AddSliderField(_Tr("Preferences", "Minimap size"), "cg_minimapSize", 128, 256,
                                     8, ConfigNumberFormatter(0, " px"));

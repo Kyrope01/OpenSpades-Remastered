@@ -30,6 +30,7 @@ uniform vec3 tint;
 uniform float sharpening;
 uniform float sharpeningFinalGain;
 uniform float blurPixelShift;
+uniform float filmicToneMapping;
 
 vec3 acesToneMapping(vec3 x)
 {
@@ -67,23 +68,26 @@ void main() {
 		// `sharpening` tells to what extent we must enhance the edges based on
 		// global factors.
 		float enhancingFactor = sharpening;
-#if USE_HDR
-		// Now we take the derivative of `acesToneMapping` into consideration.
-		// Specifially, when `acesToneMapping` reduces the color contrast
-		// around the current pixel by N times, we compensate by scaling
-		// `enhancingFactor` by N.
-		float localLuminance = dot(blurred.xyz, vec3(1. / 3.));
-		float localLuminanceLinear = clamp(localLuminance * localLuminance, 0.0, 1.0);
-		enhancingFactor *= acesToneMappingDiffRcp(localLuminanceLinear * 0.8);
+		if (filmicToneMapping > 0.5) {
+			// Take the derivative of `acesToneMapping` into consideration.
+			// Specifically, when `acesToneMapping` reduces the color contrast
+			// around the current pixel by N times, compensate by scaling
+			// `enhancingFactor` by N.
+			float localLuminance = dot(blurred.xyz, vec3(1. / 3.));
+			float localLuminanceLinear = clamp(localLuminance * localLuminance, 0.0, 1.0);
+			enhancingFactor *= acesToneMappingDiffRcp(localLuminanceLinear * 0.8);
 
-		// We don't want specular highlights to cause black edges, so weaken the
-		// effect if the local luminance is high.
-		localLuminance = max(localLuminance, dot(gl_FragColor.xyz, vec3(1. / 3.)));
-		if (localLuminance > 1.0) {
-			localLuminance -= 1.0;
-			enhancingFactor *= 1.0 - (localLuminance + localLuminance * localLuminance) * 100.0;
-		}
+#if USE_HDR
+			// We don't want specular highlights to cause black edges, so weaken the
+			// effect if the local luminance is high.
+			localLuminance = max(localLuminance, dot(gl_FragColor.xyz, vec3(1. / 3.)));
+			if (localLuminance > 1.0) {
+				localLuminance -= 1.0;
+				enhancingFactor *=
+				  1.0 - (localLuminance + localLuminance * localLuminance) * 100.0;
+			}
 #endif
+		}
 
 		// Clamp the sharpening effect's intensity.
 		enhancingFactor = clamp(enhancingFactor, 1.0, 4.0);
@@ -112,18 +116,18 @@ void main() {
 	vec3 gray = vec3(dot(gl_FragColor.xyz, vec3(1. / 3.)));
 	gl_FragColor.xyz = mix(gray, gl_FragColor.xyz, saturation);
 
-#if USE_HDR
-	gl_FragColor.xyz *= gl_FragColor.xyz; // linearize
-	gl_FragColor.xyz = acesToneMapping(gl_FragColor.xyz * 0.8);
-	gl_FragColor.xyz = sqrt(gl_FragColor.xyz); // delinearize
+	if (filmicToneMapping > 0.5) {
+		// Use a filmic ACES approximation in linear color space. Running this
+		// independently of USE_HDR also gives LDR rendering a smooth highlight
+		// shoulder instead of a hard clip.
+		gl_FragColor.xyz *= gl_FragColor.xyz; // linearize
+		gl_FragColor.xyz = acesToneMapping(gl_FragColor.xyz * 0.8);
+		gl_FragColor.xyz = sqrt(gl_FragColor.xyz); // delinearize
+	}
+
 	gl_FragColor.xyz = mix(gl_FragColor.xyz,
 						   smoothstep(0., 1., gl_FragColor.xyz),
 						   enhancement);
-#else
-	gl_FragColor.xyz = mix(gl_FragColor.xyz,
-						   smoothstep(0., 1., gl_FragColor.xyz),
-						   enhancement);
-#endif
 
 	gl_FragColor.w = 1.;
 

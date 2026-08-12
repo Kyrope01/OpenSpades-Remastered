@@ -47,9 +47,13 @@ namespace spades {
 			GLQuadRenderer qr(dev);
 
 			GLColorBuffer output = input.GetManager()->CreateBufferHandle();
-			
-			float sharpeningFinalGainValue =
-			  std::max(std::min(settings.r_sharpen.operator float(), 1.0f), 0.0f);
+
+			bool applyColorCorrection = settings.r_colorCorrection;
+			float sharpeningFinalGainValue = 0.0f;
+			if (applyColorCorrection) {
+				sharpeningFinalGainValue =
+				  std::max(std::min(settings.r_sharpen.operator float(), 1.0f), 0.0f);
+			}
 			GLColorBuffer blurredInput = input;
 
 			if (sharpeningFinalGainValue > 0.0f) {
@@ -93,6 +97,7 @@ namespace spades {
 			static GLProgramUniform sharpening("sharpening");
 			static GLProgramUniform sharpeningFinalGain("sharpeningFinalGain");
 			static GLProgramUniform blurPixelShift("blurPixelShift");
+			static GLProgramUniform filmicToneMapping("filmicToneMapping");
 
 			saturation(lens);
 			enhancement(lens);
@@ -100,6 +105,7 @@ namespace spades {
 			sharpening(lens);
 			sharpeningFinalGain(lens);
 			blurPixelShift(lens);
+			filmicToneMapping(lens);
 
 			dev->Enable(IGLDevice::Blend, false);
 
@@ -109,30 +115,40 @@ namespace spades {
 
 			lens->Use();
 
-			tint.SetValue(tintVal.x, tintVal.y, tintVal.z);
-
 			const client::SceneDefinition &def = renderer->GetSceneDef();
 
-			if (settings.r_hdr) {
-				// when HDR is enabled ACES tone mapping is applied first, so
-				// lower enhancement value is required
-				if (settings.r_bloom) {
-					saturation.SetValue(0.8f * def.saturation * settings.r_saturation);
-					enhancement.SetValue(0.1f);
+			if (applyColorCorrection) {
+				tint.SetValue(tintVal.x, tintVal.y, tintVal.z);
+
+				if (settings.r_filmicToneMapping) {
+					// ACES tone mapping already enhances contrast, so use a lower
+					// secondary enhancement value when it is enabled.
+					if (settings.r_bloom) {
+						saturation.SetValue(0.8f * def.saturation * settings.r_saturation);
+						enhancement.SetValue(0.1f);
+					} else {
+						saturation.SetValue(0.9f * def.saturation * settings.r_saturation);
+						enhancement.SetValue(0.0f);
+					}
 				} else {
-					saturation.SetValue(0.9f * def.saturation * settings.r_saturation);
-					enhancement.SetValue(0.0f);
+					if (settings.r_bloom) {
+						// make image sharper
+						saturation.SetValue(.85f * def.saturation * settings.r_saturation);
+						enhancement.SetValue(0.7f);
+					} else {
+						saturation.SetValue(1.f * def.saturation * settings.r_saturation);
+						enhancement.SetValue(0.3f);
+					}
 				}
 			} else {
-				if (settings.r_bloom) {
-					// make image sharper
-					saturation.SetValue(.85f * def.saturation * settings.r_saturation);
-					enhancement.SetValue(0.7f);
-				} else {
-					saturation.SetValue(1.f * def.saturation * settings.r_saturation);
-					enhancement.SetValue(0.3f);
-				}
+				// Filmic tone mapping is an independent effect. Keep every color
+				// correction control at its identity value when only filmic is enabled.
+				tint.SetValue(1.f, 1.f, 1.f);
+				saturation.SetValue(1.f);
+				enhancement.SetValue(0.f);
 			}
+
+			filmicToneMapping.SetValue(settings.r_filmicToneMapping ? 1.f : 0.f);
 
 			lensTexture.SetValue(0);
 			blurredTexture.SetValue(1);

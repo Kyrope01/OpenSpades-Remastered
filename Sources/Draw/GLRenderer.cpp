@@ -208,7 +208,7 @@ namespace spades {
 				GLLensFlareFilter(this);
 			}
 
-			if (settings.r_colorCorrection) {
+			if (settings.r_colorCorrection || settings.r_filmicToneMapping) {
 				GLColorCorrectionFilter(this);
 			}
 
@@ -1063,21 +1063,30 @@ namespace spades {
 					handle = GLNonlinearlizeFilter(this).Filter(handle);
 				}
 
-				if (settings.r_colorCorrection) {
-					GLProfiler::Context p(*profiler, "Color Correction");
-					Vector3 tint = smoothedFogColor + MakeVector3(1.f, 1.f, 1.f) * 0.5f;
-					tint = MakeVector3(1.f, 1.f, 1.f) / tint;
-					tint = Mix(tint, MakeVector3(1.f, 1.f, 1.f), 0.2f);
-					tint *= 1.f / std::min(std::min(tint.x, tint.y), tint.z);
+				if (settings.r_colorCorrection || settings.r_filmicToneMapping) {
+					GLProfiler::Context p(*profiler, "Color Correction / Filmic Tonemapping");
+					Vector3 tint = MakeVector3(1.f, 1.f, 1.f);
+					float fogLuminance = 0.f;
 
-					float fogLuminance = (fogColor.x + fogColor.y + fogColor.z) * (1.0f / 3.0f);
+					if (settings.r_colorCorrection) {
+						tint = smoothedFogColor + MakeVector3(1.f, 1.f, 1.f) * 0.5f;
+						tint = MakeVector3(1.f, 1.f, 1.f) / tint;
+						tint = Mix(tint, MakeVector3(1.f, 1.f, 1.f), 0.2f);
+						tint *= 1.f / std::min(std::min(tint.x, tint.y), tint.z);
 
-					float exposure = powf(2.f, (float)settings.r_exposureValue * 0.5f);
-					handle =
-					  GLColorCorrectionFilter(this).Filter(handle, tint * exposure, fogLuminance);
+						fogLuminance =
+						  (fogColor.x + fogColor.y + fogColor.z) * (1.0f / 3.0f);
 
-					// update smoothed fog color
-					smoothedFogColor = Mix(smoothedFogColor, fogColor, 0.002f);
+						float exposure = powf(2.f, (float)settings.r_exposureValue * 0.5f);
+						tint *= exposure;
+					}
+
+					handle = GLColorCorrectionFilter(this).Filter(handle, tint, fogLuminance);
+
+					if (settings.r_colorCorrection) {
+						// update smoothed fog color
+						smoothedFogColor = Mix(smoothedFogColor, fogColor, 0.002f);
+					}
 				}
 			}
 
