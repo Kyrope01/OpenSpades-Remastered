@@ -628,12 +628,18 @@ namespace spades {
             nameField.MaxLength = 15;
             nameField.DenyNonAscii = true;
 
+            layouter.AddHeading(_Tr("Preferences", "Remastered Features"));
+            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
+                                    ConfigNumberFormatter(0, " deg"));
+            layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
+            layouter.AddToggleField(_Tr("Preferences", "Filmic Tonemapping"),
+                                    "r_filmicToneMapping");
+
             layouter.AddHeading(_Tr("Preferences", "Effects"));
             layouter.AddToggleField(_Tr("Preferences", "Blood"), "cg_blood");
             layouter.AddToggleField(_Tr("Preferences", "Ejecting Brass"), "cg_ejectBrass");
             layouter.AddToggleField(_Tr("Preferences", "Ragdoll"), "cg_ragdoll");
             layouter.AddToggleField(_Tr("Preferences", "Animations"), "cg_animations");
-            layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
             layouter.AddChoiceField(_Tr("Preferences", "Camera Shake"), "cg_shake",
                                     array<string> = {_Tr("Preferences", "MORE"),
                                                      _Tr("Preferences", "NORMAL"),
@@ -655,8 +661,6 @@ namespace spades {
             layouter.AddToggleField(_Tr("Preferences", "Server Alert"), "cg_serverAlert");
 
             layouter.AddHeading(_Tr("Preferences", "Misc"));
-            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
-                                    ConfigNumberFormatter(0, " deg"));
             layouter.AddSliderField(_Tr("Preferences", "Minimap size"), "cg_minimapSize", 128, 256,
                                     8, ConfigNumberFormatter(0, " px"));
             layouter.AddToggleField(_Tr("Preferences", "Show Statistics"), "cg_stats");
