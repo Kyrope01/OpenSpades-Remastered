@@ -1,20 +1,13 @@
 name: Build Debian release
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing GitHub release tag to build and upload to
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: debian-release-${{ github.event.release.tag_name || inputs.tag }}
+  group: debian-release-release
   cancel-in-progress: false
 
 jobs:
@@ -58,21 +51,16 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: release
           submodules: false
 
       - name: Set release variables
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -eu
-          test -n "$RELEASE_TAG"
-
-          TAG_SLUG="$(printf '%s' "$RELEASE_TAG" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
-          test -n "$TAG_SLUG" || TAG_SLUG=release
-
+          RELEASE_TAG="release"
+          
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
-          echo "ARCHIVE_NAME=OpenSpades-${TAG_SLUG}-linux-debian12-x86_64" >> "$GITHUB_ENV"
+          echo "ARCHIVE_NAME=OpenSpades-release-linux-debian12-x86_64" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
