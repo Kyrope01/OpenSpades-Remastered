@@ -416,6 +416,7 @@ namespace spades {
 			centerMessageView->Update(dt);
 			mapView->Update(dt);
 			largeMapView->Update(dt);
+			UpdateDamageIndicators(dt);
 
 			UpdateAutoFocus(dt);
 

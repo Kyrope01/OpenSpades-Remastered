@@ -160,6 +160,23 @@ namespace spades {
 			};
 			std::vector<HurtSprite> hurtSprites;
 
+			struct DamageIndicator {
+				int damage;
+				int playerId;
+				unsigned int fireSequence;
+				float fade;
+				float lastHitTime;
+				Vector3 position;
+				Vector3 velocity;
+				bool crit;
+
+				DamageIndicator()
+				    : damage(0), playerId(-1), fireSequence(0), fade(0.f), lastHitTime(0.f),
+				      crit(false) {}
+			};
+			std::list<DamageIndicator> damageIndicators;
+			unsigned int localFireSequence = 0;
+
 			float GetAimDownState();
 			float GetSprintState();
 
@@ -369,6 +386,8 @@ namespace spades {
 			 */
 			void DrawSpectateHUD();
 
+			void UpdateDamageIndicators(float dt);
+			void DrawDamageIndicators();
 			void DrawHottrackedPlayerName();
 			void DrawHurtScreenEffect();
 			void DrawHurtSprites();

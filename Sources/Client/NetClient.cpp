@@ -884,8 +884,7 @@ namespace spades {
 					if (!GetWorld())
 						break;
 					{
-						reader.ReadByte(); // skip player Id
-						// Player *p = GetPlayerOrNull(reader.ReadByte());
+						int ownerId = reader.ReadByte();
 						float fuseLen = reader.ReadFloat();
 						Vector3 pos, vel;
 						pos.x = reader.ReadFloat();
@@ -901,7 +900,7 @@ namespace spades {
 						    break;
 						}*/
 
-						Grenade *g = new Grenade(GetWorld(), pos, vel, fuseLen);
+						Grenade *g = new Grenade(GetWorld(), ownerId, pos, vel, fuseLen);
 						GetWorld()->AddGrenade(g);
 					}
 					break;

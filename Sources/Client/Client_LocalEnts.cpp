@@ -74,6 +74,7 @@ namespace spades {
 		void Client::RemoveAllLocalEntities() {
 			SPADES_MARK_FUNCTION();
 
+			damageIndicators.clear();
 			localEntities.clear();
 		}
 

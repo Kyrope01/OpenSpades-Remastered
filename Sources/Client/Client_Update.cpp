@@ -59,6 +59,7 @@ SPADES_SETTING(cg_centerMessage);
 SPADES_SETTING(cg_shake);
 
 SPADES_SETTING(cg_holdAimDownSight);
+SPADES_SETTING(cg_damageIndicators);
 
 namespace spades {
 	namespace client {
@@ -640,6 +641,9 @@ namespace spades {
 
 			if (p == world->GetLocalPlayer()) {
 				localFireVibrationTime = time;
+				// BulletHitPlayer is called once per pellet immediately after this
+				// callback. A sequence ID lets all pellets from one shot share a number.
+				++localFireSequence;
 			}
 
 			clientPlayers[p->GetId()]->FiredWeapon();
@@ -984,6 +988,47 @@ namespace spades {
 			if (by == world->GetLocalPlayer() && hurtPlayer) {
 				net->SendHit(hurtPlayer->GetId(), type);
 
+				if ((int)cg_damageIndicators != 0 && type != HitTypeMelee) {
+					float distance = (hitPos - by->GetEye()).GetLength();
+					int damage = by->GetWeapon()->GetDamage(type, distance);
+
+					DamageIndicator *indicator = nullptr;
+					for (DamageIndicator &existing : damageIndicators) {
+						if (existing.playerId == hurtPlayer->GetId() &&
+						    existing.fireSequence == localFireSequence) {
+							indicator = &existing;
+							break;
+						}
+					}
+
+					if (indicator) {
+						indicator->damage += damage;
+						if (!indicator->crit && indicator->damage >= 100) {
+							indicator->crit = true;
+							indicator->velocity.x = 0.f;
+							indicator->velocity.y = 0.f;
+							indicator->velocity.z = -2.f;
+						}
+						indicator->fade = indicator->crit ? 2.f : 1.5f;
+						indicator->lastHitTime = time;
+					} else {
+						DamageIndicator added;
+						added.damage = damage;
+						added.playerId = hurtPlayer->GetId();
+						added.fireSequence = localFireSequence;
+						added.position = hitPos;
+						added.crit = damage >= 100;
+						added.velocity =
+						  added.crit
+						    ? MakeVector3(0.f, 0.f, -2.f)
+						    : MakeVector3((SampleRandomFloat() - SampleRandomFloat()) * 4.f,
+						                  (SampleRandomFloat() - SampleRandomFloat()) * 4.f, -2.f);
+						added.fade = added.crit ? 2.f : 1.5f;
+						added.lastHitTime = time;
+						damageIndicators.push_back(added);
+					}
+				}
+
 				if (type == HitTypeHead) {
 					Handle<IAudioChunk> c =
 					  audioDevice->RegisterSound("Sounds/Feedback/HeadshotFeedback.opus");
@@ -1210,6 +1255,62 @@ namespace spades {
 						soundPos.z = (float)outPos.z - .2f;
 					}
 					audioDevice->Play(c, soundPos, param);
+				}
+
+				// As in ZeroSpades, grenade numbers are a client-side estimate and can
+				// differ from the authoritative value on a modified server.
+				Player *localPlayer = world->GetLocalPlayer();
+				if ((int)cg_damageIndicators >= 2 && localPlayer &&
+				    g->GetOwnerId() == localPlayer->GetId()) {
+					GameMap *gameMap = world->GetMap();
+					for (size_t i = 0; i < world->GetNumPlayerSlots(); ++i) {
+						Player *player = world->GetPlayer(static_cast<unsigned int>(i));
+						if (!player || player == localPlayer || !player->IsAlive() ||
+						    player->IsSpectator() || player->GetTeamId() == localPlayer->GetTeamId()) {
+							continue;
+						}
+
+						Vector3 playerPos = player->GetEye();
+						int damage = g->GetDamage(playerPos);
+						if (damage <= 0)
+							continue;
+
+						// Do not predict damage through solid map geometry.
+						Vector3 toExplosion = g->GetPosition() - playerPos;
+						float explosionDistance = toExplosion.GetLength();
+						IntVector3 hitBlock;
+						if (explosionDistance > .01f &&
+						    gameMap->CastRay(playerPos, toExplosion / explosionDistance,
+						                     explosionDistance, hitBlock)) {
+							continue;
+						}
+
+						// Also avoid revealing a victim hidden from the current camera.
+						Vector3 toVictim = playerPos - lastSceneDef.viewOrigin;
+						float victimDistance = toVictim.GetLength();
+						if (victimDistance > .01f) {
+							GameMap::RayCastResult result = gameMap->CastRay2(
+							  lastSceneDef.viewOrigin, toVictim / victimDistance,
+							  (int)victimDistance + 1);
+							if (result.hit &&
+							    (result.hitPos - lastSceneDef.viewOrigin).GetLength() < victimDistance) {
+								continue;
+							}
+						}
+
+						DamageIndicator indicator;
+						indicator.damage = damage;
+						indicator.playerId = player->GetId();
+						indicator.position = playerPos;
+						indicator.crit = damage >= 100;
+						indicator.velocity = MakeVector3(0.f, 0.f, -2.f);
+						indicator.fade = indicator.crit ? 2.f : 1.5f;
+						indicator.lastHitTime = time;
+						damageIndicators.push_back(indicator);
+
+						hitFeedbackIconState = 1.f;
+						hitFeedbackFriendly = false;
+					}
 				}
 			}
 		}

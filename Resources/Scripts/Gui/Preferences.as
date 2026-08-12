@@ -632,6 +632,11 @@ namespace spades {
             layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
                                     ConfigNumberFormatter(0, " deg"));
             layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
+            layouter.AddChoiceField(_Tr("Preferences", "Damage Numbers"), "cg_damageIndicators",
+                                    array<string> = {_Tr("Preferences", "OFF"),
+                                                     _Tr("Preferences", "ON"),
+                                                     _Tr("Preferences", "Grenades")},
+                                    array<int> = {0, 1, 2});
             layouter.AddSliderField(_Tr("Preferences", "Tracer Light Intensity"),
                                     "cg_tracerLightIntensity", 0, 4, 0.1,
                                     ConfigNumberFormatter(1, "x"));

@@ -817,7 +817,7 @@ namespace spades {
 			vel += GetVelocity();
 
 			if (this == world->GetLocalPlayer()) {
-				Grenade *gren = new Grenade(world, muzzle, vel, fuse);
+				Grenade *gren = new Grenade(world, GetId(), muzzle, vel, fuse);
 				world->AddGrenade(gren);
 				if (world->GetListener())
 					world->GetListener()->PlayerThrownGrenade(this, gren);
