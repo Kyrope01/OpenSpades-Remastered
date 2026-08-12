@@ -296,7 +296,7 @@ namespace spades {
 		}
 
 		void GLMapChunk::RenderDepthPass() {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			Vector3 eye = renderer->renderer->GetSceneDef().viewOrigin;
 
 			if (!realized)
@@ -347,15 +347,13 @@ namespace spades {
 			device->VertexAttribPointer(positionAttribute(), 3, IGLDevice::UnsignedByte, false,
 			                            sizeof(Vertex), (void *)asOFFSET(Vertex, x));
 
-			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, iBuffer);
 			device->DrawElements(IGLDevice::Triangles,
 			                     static_cast<IGLDevice::Sizei>(indices.size()),
 			                     IGLDevice::UnsignedShort, NULL);
-			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
 		}
 		void GLMapChunk::RenderSunlightPass() {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			Vector3 eye = renderer->renderer->GetSceneDef().viewOrigin;
 
 			if (!realized)
@@ -427,16 +425,14 @@ namespace spades {
 			device->VertexAttribPointer(fixedPositionAttribute(), 3, IGLDevice::Byte, false,
 			                            sizeof(Vertex), (void *)asOFFSET(Vertex, sx));
 
-			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, iBuffer);
 			device->DrawElements(IGLDevice::Triangles,
 			                     static_cast<IGLDevice::Sizei>(indices.size()),
 			                     IGLDevice::UnsignedShort, NULL);
-			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
 		}
 
-		void GLMapChunk::RenderDLightPass(std::vector<GLDynamicLight> lights) {
-			SPADES_MARK_FUNCTION();
+		void GLMapChunk::RenderDLightPass(const std::vector<GLDynamicLight> &lights) {
+			SPADES_MARK_FUNCTION_DEBUG();
 			Vector3 eye = renderer->renderer->GetSceneDef().viewOrigin;
 
 			if (!realized)
@@ -471,6 +467,16 @@ namespace spades {
 			if (!renderer->renderer->BoxFrustrumCull(bx))
 				return;
 
+			bool affected = false;
+			for (const GLDynamicLight &light : lights) {
+				if (light.Cull(bx)) {
+					affected = true;
+					break;
+				}
+			}
+			if (!affected)
+				return;
+
 			GLProgram *program = renderer->dlightProgram;
 
 			static GLProgramUniform chunkPosition("chunkPosition");
@@ -495,22 +501,19 @@ namespace spades {
 			device->VertexAttribPointer(normalAttribute(), 3, IGLDevice::Byte, false,
 			                            sizeof(Vertex), (void *)asOFFSET(Vertex, nx));
 
-			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, iBuffer);
-			for (size_t i = 0; i < lights.size(); i++) {
+			for (const GLDynamicLight &light : lights) {
+				if (!light.Cull(bx))
+					continue;
 
 				static GLDynamicLightShader lightShader;
-				lightShader(renderer->renderer, program, lights[i], 1);
-
-				if (!lights[i].Cull(bx))
-					continue;
+				lightShader(renderer->renderer, program, light, 1);
 
 				device->DrawElements(IGLDevice::Triangles,
 				                     static_cast<IGLDevice::Sizei>(indices.size()),
 				                     IGLDevice::UnsignedShort, NULL);
 			}
 
-			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
 		}
 
 		float GLMapChunk::DistanceFromEye(const Vector3 &eye) {

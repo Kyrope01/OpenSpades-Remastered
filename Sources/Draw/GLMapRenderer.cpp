@@ -181,6 +181,8 @@ namespace spades {
 			}
 
 
+			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
+			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
 			device->EnableVertexAttribArray(positionAttribute(), false);
 			device->ColorMask(true, true, true, true);
 
@@ -292,6 +294,8 @@ namespace spades {
 				}
 			}
 
+			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
+			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
 			device->EnableVertexAttribArray(positionAttribute(), false);
 			if (ambientOcclusionCoordAttribute() != -1)
 				device->EnableVertexAttribArray(ambientOcclusionCoordAttribute(), false);
@@ -306,7 +310,7 @@ namespace spades {
 			device->BindTexture(IGLDevice::Texture2D, 0);
 		}
 
-		void GLMapRenderer::RenderDynamicLightPass(std::vector<GLDynamicLight> lights) {
+		void GLMapRenderer::RenderDynamicLightPass(const std::vector<GLDynamicLight> &lights) {
 			SPADES_MARK_FUNCTION();
 
 			GLProfiler::Context profiler(renderer->GetGLProfiler(), "Map");
@@ -366,9 +370,7 @@ namespace spades {
 			int cy = (int)floorf(eye.y) / GLMapChunk::Size;
 			int cz = (int)floorf(eye.z) / GLMapChunk::Size;
 			DrawColumnDLight(cx, cy, cz, eye, lights);
-			// TODO: optimize call
-			//       ex. don't call a chunk'r render method if
-			//           no dlight lights it
+			// Each chunk rejects the pass before GL setup when no dynamic light reaches it.
 			for (int dist = 1; dist <= 128 / GLMapChunk::Size; dist++) {
 				for (int x = cx - dist; x <= cx + dist; x++) {
 					DrawColumnDLight(x, cy + dist, cz, eye, lights);
@@ -380,6 +382,8 @@ namespace spades {
 				}
 			}
 
+			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
+			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
 			device->EnableVertexAttribArray(positionAttribute(), false);
 			device->EnableVertexAttribArray(colorAttribute(), false);
 			device->EnableVertexAttribArray(normalAttribute(), false);

@@ -39,8 +39,11 @@ namespace spades {
 			IGLDevice *device;
 
 			struct RenderModel {
-				GLModel *model;
+				GLModel *model = nullptr;
 				std::vector<client::ModelRenderParam> params;
+				bool hasGhost = false;
+				bool hasNonGhost = false;
+				bool hasShadowCaster = false;
 			};
 
 			std::vector<RenderModel> models;
@@ -56,7 +59,7 @@ namespace spades {
 
 			void Prerender(bool ghostPass);
 			void RenderSunlightPass(bool ghostPass);
-			void RenderDynamicLightPass(std::vector<GLDynamicLight> lights);
+			void RenderDynamicLightPass(const std::vector<GLDynamicLight> &lights);
 
 			void Clear();
 		};

@@ -524,7 +524,7 @@ namespace spades {
 			printf("%d vertices emit\n", (int)indices.size());
 		}
 
-		void GLOptimizedVoxelModel::Prerender(std::vector<client::ModelRenderParam> params,
+		void GLOptimizedVoxelModel::Prerender(const std::vector<client::ModelRenderParam> &params,
 		                                      bool ghostPass) {
 			SPADES_MARK_FUNCTION();
 
@@ -532,7 +532,7 @@ namespace spades {
 		}
 
 		void
-		GLOptimizedVoxelModel::RenderShadowMapPass(std::vector<client::ModelRenderParam> params) {
+		GLOptimizedVoxelModel::RenderShadowMapPass(const std::vector<client::ModelRenderParam> &params) {
 			SPADES_MARK_FUNCTION();
 
 			device->Enable(IGLDevice::CullFace, true);
@@ -614,7 +614,7 @@ namespace spades {
 			device->BindTexture(IGLDevice::Texture2D, 0);
 		}
 
-		void GLOptimizedVoxelModel::RenderSunlightPass(std::vector<client::ModelRenderParam> params,
+		void GLOptimizedVoxelModel::RenderSunlightPass(const std::vector<client::ModelRenderParam> &params,
 		                                               bool ghostPass) {
 			SPADES_MARK_FUNCTION();
 
@@ -771,11 +771,31 @@ namespace spades {
 		}
 
 		void
-		GLOptimizedVoxelModel::RenderDynamicLightPass(std::vector<client::ModelRenderParam> params,
-		                                              std::vector<GLDynamicLight> lights) {
+		GLOptimizedVoxelModel::RenderDynamicLightPass(const std::vector<client::ModelRenderParam> &params,
+		                                              const std::vector<GLDynamicLight> &lights) {
 			SPADES_MARK_FUNCTION();
 
 			bool mirror = renderer->IsRenderingMirror();
+			bool hasAffectedInstance = false;
+			for (const client::ModelRenderParam &param : params) {
+				if (param.ghost || (mirror && param.depthHack))
+					continue;
+
+				float rad = radius * param.matrix.GetAxis(0).GetLength();
+				if (!renderer->SphereFrustrumCull(param.matrix.GetOrigin(), rad))
+					continue;
+
+				for (const GLDynamicLight &light : lights) {
+					if (light.SphereCull(param.matrix.GetOrigin(), rad)) {
+						hasAffectedInstance = true;
+						break;
+					}
+				}
+				if (hasAffectedInstance)
+					break;
+			}
+			if (!hasAffectedInstance)
+				return;
 
 			device->ActiveTexture(0);
 			aoImage->Bind(IGLDevice::Texture2D);
@@ -857,6 +877,16 @@ namespace spades {
 					continue;
 				}
 
+				bool affected = false;
+				for (const GLDynamicLight &light : lights) {
+					if (light.SphereCull(param.matrix.GetOrigin(), rad)) {
+						affected = true;
+						break;
+					}
+				}
+				if (!affected)
+					continue;
+
 				static GLProgramUniform customColor("customColor");
 				customColor(dlightProgram);
 				customColor.SetValue(param.customColor.x, param.customColor.y, param.customColor.z);
@@ -885,11 +915,11 @@ namespace spades {
 				if (param.depthHack) {
 					device->DepthRange(0.f, 0.1f);
 				}
-				for (size_t i = 0; i < lights.size(); i++) {
-					if (!lights[i].SphereCull(param.matrix.GetOrigin(), rad))
+				for (const GLDynamicLight &light : lights) {
+					if (!light.SphereCull(param.matrix.GetOrigin(), rad))
 						continue;
 
-					dlightShader(renderer, dlightProgram, lights[i], 2);
+					dlightShader(renderer, dlightProgram, light, 2);
 
 					device->DrawElements(IGLDevice::Triangles, numIndices, IGLDevice::UnsignedInt,
 					                     (void *)0);

@@ -20,6 +20,10 @@
 
 #pragma once
 
+#include <array>
+#include <unordered_map>
+#include <vector>
+
 #include <Imports/OpenGL.h>
 #include <Imports/SDL.h>
 
@@ -31,6 +35,54 @@ namespace spades {
 			SDL_Window *window;
 			SDL_GLContext context;
 			int w, h;
+
+			struct CachedUInteger {
+				UInteger value = 0;
+				bool valid = false;
+			};
+
+			struct TextureParameterState {
+				std::array<Integer, 7> integerValues{};
+				std::array<bool, 7> integerValuesValid{};
+				std::array<Float, 7> floatValues{};
+				std::array<bool, 7> floatValuesValid{};
+			};
+
+			std::array<int, 5> enabledStates;
+			std::array<CachedUInteger, 4> bufferBindings;
+			std::vector<std::array<CachedUInteger, 3>> textureBindings;
+			std::unordered_map<UInteger, TextureParameterState> textureParameters;
+			std::vector<int> vertexAttribArrayStates;
+
+			UInteger activeTextureStage = 0;
+			bool activeTextureStageValid = false;
+			UInteger currentProgram = 0;
+			bool currentProgramValid = false;
+			CachedUInteger readFramebuffer;
+			CachedUInteger drawFramebuffer;
+			CachedUInteger renderbufferBinding;
+
+			bool depthMask = true;
+			bool depthMaskValid = false;
+			unsigned int colorMask = 0;
+			bool colorMaskValid = false;
+			Enum frontFace = CW;
+			bool frontFaceValid = false;
+			Enum depthFunction = Less;
+			bool depthFunctionValid = false;
+			Enum blendEquationRgb = Add;
+			Enum blendEquationAlpha = Add;
+			bool blendEquationValid = false;
+			Enum blendSourceRgb = One;
+			Enum blendDestinationRgb = Zero;
+			Enum blendSourceAlpha = One;
+			Enum blendDestinationAlpha = Zero;
+			bool blendFunctionValid = false;
+			Integer viewportX = 0;
+			Integer viewportY = 0;
+			Sizei viewportWidth = 0;
+			Sizei viewportHeight = 0;
+			bool viewportValid = false;
 
 		protected:
 			~SDLGLDevice();

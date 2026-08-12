@@ -679,7 +679,10 @@ namespace spades {
 			GLModel *lastModel;
 
 			ModelRenderer() {
-				params.resize(64);
+				params.reserve(64);
+				// The legacy batch starts with identity transforms. One produces the same
+				// depth result as 64 identical copies without repeating the draw 64 times.
+				params.resize(1);
 				lastModel = NULL;
 			}
 

@@ -90,7 +90,7 @@ namespace spades {
 
 			void RenderSunlightPass();
 			void RenderDepthPass();
-			void RenderDLightPass(std::vector<GLDynamicLight> lights);
+			void RenderDLightPass(const std::vector<GLDynamicLight> &lights);
 		};
 	}
 }

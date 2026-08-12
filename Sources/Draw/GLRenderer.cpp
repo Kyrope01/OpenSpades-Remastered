@@ -533,7 +533,7 @@ namespace spades {
 #pragma mark - Add Scene Objects
 
 		void GLRenderer::RenderModel(client::IModel *model, const client::ModelRenderParam &param) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 
 			GLModel *m = dynamic_cast<GLModel *>(model);
 			if (!m) {

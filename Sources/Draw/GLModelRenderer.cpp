@@ -37,7 +37,7 @@ namespace spades {
 		}
 
 		void GLModelRenderer::AddModel(GLModel *model, const client::ModelRenderParam &param) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			if (model->renderId == -1) {
 				model->renderId = (int)models.size();
 				RenderModel m;
@@ -46,7 +46,11 @@ namespace spades {
 				models.push_back(m);
 			}
 			modelCount++;
-			models[model->renderId].params.push_back(param);
+			RenderModel &renderModel = models[model->renderId];
+			renderModel.params.push_back(param);
+			renderModel.hasGhost |= param.ghost;
+			renderModel.hasNonGhost |= !param.ghost;
+			renderModel.hasShadowCaster |= param.castShadow && !param.ghost && !param.depthHack;
 		}
 
 		void GLModelRenderer::RenderShadowMapPass() {
@@ -58,6 +62,8 @@ namespace spades {
 			int numModels = 0;
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
+				if (!m.hasShadowCaster)
+					continue;
 				GLModel *model = m.model;
 				model->RenderShadowMapPass(m.params);
 				numModels += (int)m.params.size();
@@ -77,6 +83,8 @@ namespace spades {
 			int numModels = 0;
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
+				if (ghostPass ? !m.hasGhost : !m.hasNonGhost)
+					continue;
 				GLModel *model = m.model;
 				model->Prerender(m.params, ghostPass);
 				numModels += (int)m.params.size();
@@ -92,13 +100,15 @@ namespace spades {
 
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
+				if (ghostPass ? !m.hasGhost : !m.hasNonGhost)
+					continue;
 				GLModel *model = m.model;
 
 				model->RenderSunlightPass(m.params, ghostPass);
 			}
 		}
 
-		void GLModelRenderer::RenderDynamicLightPass(std::vector<GLDynamicLight> lights) {
+		void GLModelRenderer::RenderDynamicLightPass(const std::vector<GLDynamicLight> &lights) {
 			SPADES_MARK_FUNCTION();
 
 			GLProfiler::Context profiler(renderer->GetGLProfiler(), "Model [%d model(s), %d unique model type(s)]", modelCount,
@@ -108,10 +118,15 @@ namespace spades {
 
 				for (size_t i = 0; i < models.size(); i++) {
 					RenderModel &m = models[i];
+					if (!m.hasNonGhost)
+						continue;
 					GLModel *model = m.model;
 
 					model->RenderDynamicLightPass(m.params, lights);
 				}
+
+				// Keep the pass postcondition even when every backend rejected all lights.
+				device->ActiveTexture(0);
 			}
 		}
 
