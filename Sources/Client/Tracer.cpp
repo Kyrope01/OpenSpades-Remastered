@@ -13,6 +13,7 @@
 #include <Draw/SWRenderer.h>
 
 DEFINE_SPADES_SETTING(cg_glowingTracers, "1");
+DEFINE_SPADES_SETTING(cg_tracerLightIntensity, "1.5");
 
 namespace spades {
 	namespace client {
@@ -58,15 +59,18 @@ namespace spades {
 				return;
 			}
 
-			if ((int)cg_glowingTracers != 0) {
+			float lightIntensity =
+			  std::min(4.f, std::max(0.f, (float)cg_tracerLightIntensity));
+			if ((int)cg_glowingTracers != 0 && lightIntensity > 0.f) {
 				float streakLength = visibleEndDist - visibleStartDist;
 
 				DynamicLightParam light;
 				light.type = DynamicLightTypePoint;
 				light.origin =
 				  startPos + dir * ((visibleStartDist + visibleEndDist) * 0.5f);
-				light.radius = std::min(7.f, std::max(3.5f, streakLength * 0.65f + 1.5f));
-				light.color = MakeVector3(2.4f, .9f, .25f);
+				light.radius = std::min(10.f, std::max(5.f, streakLength * 0.75f + 2.f));
+				light.color = MakeVector3(2.4f, .9f, .25f) * lightIntensity;
+				light.ignoreGlobalDisable = true;
 				r->AddLight(light);
 			}
 

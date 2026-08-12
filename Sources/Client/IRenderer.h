@@ -83,6 +83,10 @@ namespace spades {
 			/** When set to `true`, the lens flare post-effect is enabled for
 			 * the light. */
 			bool useLensFlare = false;
+
+			/** Allows an explicitly enabled effect to keep this light active when
+			 * the global dynamic-light setting is disabled. */
+			bool ignoreGlobalDisable = false;
 		};
 
 		class IRenderer : public RefCountedObject {

@@ -1072,9 +1072,17 @@ namespace spades {
 		                             spades::Vector3 hitPos) {
 			SPADES_MARK_FUNCTION();
 
-			// Do not display tracers for bullets fired by the local player
+			// First-person tracers used to be suppressed entirely. Start them just
+			// beyond the camera instead, so local shots can glow without drawing the
+			// streak through the player's eye.
 			if (IsFirstPerson(GetCameraMode()) && GetCameraTargetPlayerId() == player->GetId()) {
-				return;
+				Vector3 path = hitPos - muzzlePos;
+				float pathLength = path.GetLength();
+				if (pathLength <= 0.01f) {
+					return;
+				}
+				float muzzleClearance = std::min(1.0f, pathLength * 0.25f);
+				muzzlePos += path * (muzzleClearance / pathLength);
 			}
 
 			float vel;

@@ -549,7 +549,7 @@ namespace spades {
 		}
 
 		void GLRenderer::AddLight(const client::DynamicLightParam &light) {
-			if (!settings.r_dlights)
+			if (!settings.r_dlights && !light.ignoreGlobalDisable)
 				return;
 			if (!SphereFrustrumCull(light.origin, light.radius))
 				return;
