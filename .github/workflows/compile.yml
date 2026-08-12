@@ -1,0 +1,146 @@
+name: Build Debian release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to build and upload to
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: debian-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    name: Build and upload Debian 12 x86_64 ZIP
+    runs-on: ubuntu-latest
+    container: debian:12-slim
+
+    steps:
+      # Install Git before checkout because the minimal Debian image does not
+      # include it. The remaining packages are OpenSpades build dependencies.
+      - name: Install Debian build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends --yes \
+            ca-certificates \
+            cmake \
+            file \
+            g++ \
+            gh \
+            git \
+            imagemagick \
+            libcurl4-openssl-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev \
+            libglew-dev \
+            libopus-dev \
+            libopusfile-dev \
+            libsdl2-dev \
+            libsdl2-image-dev \
+            libxext-dev \
+            ninja-build \
+            pkg-config \
+            unzip \
+            wget \
+            zip \
+            zlib1g-dev
+
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          submodules: false
+
+      - name: Set release variables
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -eu
+          test -n "$RELEASE_TAG"
+
+          TAG_SLUG="$(printf '%s' "$RELEASE_TAG" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          test -n "$TAG_SLUG" || TAG_SLUG=release
+
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "ARCHIVE_NAME=OpenSpades-${TAG_SLUG}-linux-debian12-x86_64" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DOPENSPADES_YSR=OFF
+
+      - name: Build
+        run: cmake --build build --parallel "$(nproc)"
+
+      - name: Create portable ZIP
+        run: |
+          set -eu
+          PACKAGE_DIR="package/$ARCHIVE_NAME"
+          mkdir -p "$PACKAGE_DIR/Resources"
+
+          install -m 0755 build/bin/openspades "$PACKAGE_DIR/openspades"
+          install -m 0644 build/Resources/*.pak "$PACKAGE_DIR/Resources/"
+          install -m 0644 build/Resources/PackageInfo.json "$PACKAGE_DIR/Resources/"
+          find build/Resources -maxdepth 1 -type f -name 'LICENSE.*' \
+            -exec cp '{}' "$PACKAGE_DIR/Resources/" ';'
+          install -m 0644 AUTHORS LICENSE README.md "$PACKAGE_DIR/"
+
+          cat > "$PACKAGE_DIR/OpenSpades.sh" <<'SCRIPT'
+          #!/usr/bin/env sh
+          set -eu
+          SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          cd "$SCRIPT_DIR"
+          exec ./openspades "$@"
+          SCRIPT
+          chmod 0755 "$PACKAGE_DIR/OpenSpades.sh"
+
+          cat > "$PACKAGE_DIR/README-DEBIAN.txt" <<'INSTRUCTIONS'
+          OpenSpades for Debian 12 (x86_64)
+          ==================================
+
+          Install the runtime libraries:
+
+            sudo apt-get update
+            sudo apt-get install libcurl4 libfreetype6 libgl1 libglew2.2 \
+              libopenal1 libopusfile0 libsdl2-2.0-0 libsdl2-image-2.0-0 \
+              libxext6 zlib1g
+
+          Start the game from this directory with:
+
+            ./OpenSpades.sh
+
+          The launcher changes to this directory before starting the game so
+          OpenSpades can locate the bundled Resources directory.
+          INSTRUCTIONS
+
+          (cd package && zip -9 -r "../$ARCHIVE_NAME.zip" "$ARCHIVE_NAME")
+          sha256sum "$ARCHIVE_NAME.zip" > "$ARCHIVE_NAME.zip.sha256"
+
+          unzip -t "$ARCHIVE_NAME.zip"
+          ldd "$PACKAGE_DIR/openspades" | tee linked-libraries.txt
+          if grep -q 'not found' linked-libraries.txt; then
+            echo 'One or more runtime libraries are missing from the build image.' >&2
+            exit 1
+          fi
+
+      - name: Upload ZIP to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "$ARCHIVE_NAME.zip" \
+            "$ARCHIVE_NAME.zip.sha256" \
+            --clobber \
+            --repo "$GITHUB_REPOSITORY"
