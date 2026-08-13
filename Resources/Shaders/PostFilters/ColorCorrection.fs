@@ -68,26 +68,24 @@ void main() {
 		// `sharpening` tells to what extent we must enhance the edges based on
 		// global factors.
 		float enhancingFactor = sharpening;
-		if (filmicToneMapping > 0.5) {
-			// Take the derivative of `acesToneMapping` into consideration.
-			// Specifically, when `acesToneMapping` reduces the color contrast
-			// around the current pixel by N times, compensate by scaling
-			// `enhancingFactor` by N.
-			float localLuminance = dot(blurred.xyz, vec3(1. / 3.));
-			float localLuminanceLinear = clamp(localLuminance * localLuminance, 0.0, 1.0);
-			enhancingFactor *= acesToneMappingDiffRcp(localLuminanceLinear * 0.8);
-
 #if USE_HDR
-			// We don't want specular highlights to cause black edges, so weaken the
-			// effect if the local luminance is high.
-			localLuminance = max(localLuminance, dot(gl_FragColor.xyz, vec3(1. / 3.)));
-			if (localLuminance > 1.0) {
-				localLuminance -= 1.0;
-				enhancingFactor *=
-				  1.0 - (localLuminance + localLuminance * localLuminance) * 100.0;
-			}
-#endif
+		// HDR rendering always passes through ACES tone mapping. Compensate for its
+		// derivative exactly as upstream OpenSpades does. Do not apply this to the
+		// optional LDR filmic curve: doing so can amplify the unsharp mask up to four
+		// times and creates visible halos around models, sprites, and terrain edges.
+		float localLuminance = dot(blurred.xyz, vec3(1. / 3.));
+		float localLuminanceLinear = clamp(localLuminance * localLuminance, 0.0, 1.0);
+		enhancingFactor *= acesToneMappingDiffRcp(localLuminanceLinear * 0.8);
+
+		// We don't want specular highlights to cause black edges, so weaken the
+		// effect if the local luminance is high.
+		localLuminance = max(localLuminance, dot(gl_FragColor.xyz, vec3(1. / 3.)));
+		if (localLuminance > 1.0) {
+			localLuminance -= 1.0;
+			enhancingFactor *=
+			  1.0 - (localLuminance + localLuminance * localLuminance) * 100.0;
 		}
+#endif
 
 		// Clamp the sharpening effect's intensity.
 		enhancingFactor = clamp(enhancingFactor, 1.0, 4.0);

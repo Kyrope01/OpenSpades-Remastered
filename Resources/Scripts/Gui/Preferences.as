@@ -162,11 +162,11 @@ namespace spades {
             Image @white = renderer.RegisterImage("Gfx/White.tga");
             float sidebarWidth = Clamp(ContentsWidth * 0.22f, 150.f, 205.f);
 
-            renderer.ColorNP = Vector4(0.012f, 0.015f, 0.019f, 0.94f);
+            renderer.ColorNP = Vector4(0.015f, 0.015f, 0.015f, 0.94f);
             renderer.DrawImage(white,
                                AABB2(pos.x + ContentsLeft, pos.y + ContentsTop, ContentsWidth,
                                      ContentsHeight));
-            renderer.ColorNP = Vector4(0.77f, 0.81f, 0.85f, 0.38f);
+            renderer.ColorNP = Vector4(0.81f, 0.81f, 0.81f, 0.38f);
             renderer.DrawImage(white,
                                AABB2(pos.x + ContentsLeft, pos.y + ContentsTop, ContentsWidth, 1.f));
             renderer.DrawImage(white, AABB2(pos.x + ContentsLeft,
@@ -211,14 +211,14 @@ namespace spades {
             Vector2 size = Size;
             Image @white = renderer.RegisterImage("Gfx/White.tga");
 
-            Vector4 fill = Vector4(0.31f, 0.33f, 0.35f, 0.78f);
+            Vector4 fill = Vector4(0.33f, 0.33f, 0.33f, 0.78f);
             Vector4 edge = Vector4(1.f, 1.f, 1.f, 0.16f);
             if (IsBackButton) {
-                fill = Vector4(0.43f, 0.10f, 0.10f, 0.82f);
-                edge = Vector4(1.f, 0.38f, 0.32f, 0.38f);
+                fill = Vector4(0.27f, 0.27f, 0.27f, 0.82f);
+                edge = Vector4(0.57f, 0.57f, 0.57f, 0.38f);
             } else if (Toggled || (Pressed && Hover)) {
                 fill += Vector4(0.19f, 0.19f, 0.19f, 0.08f);
-                edge = Vector4(0.70f, 0.84f, 1.f, 0.50f);
+                edge = Vector4(0.85f, 0.85f, 0.85f, 0.50f);
             } else if (Hover) {
                 fill += Vector4(0.10f, 0.10f, 0.10f, 0.06f);
             }
@@ -233,7 +233,7 @@ namespace spades {
 
             Vector2 textSize = Font.Measure(Caption);
             Font.DrawShadow(Caption, pos + Vector2(10.f, (size.y - textSize.y) * 0.5f), 1.f,
-                            Vector4(0.96f, 0.97f, 0.99f, 1.f),
+                            Vector4(0.97f, 0.97f, 0.97f, 1.f),
                             Vector4(0.f, 0.f, 0.f, 0.55f));
         }
     }
@@ -596,15 +596,15 @@ namespace spades {
             Vector2 size = Size;
             bool expanded = model is null or model.IsCategoryExpanded(category);
 
-            Vector4 fill = Vector4(0.10f, 0.12f, 0.15f, 0.88f);
+            Vector4 fill = Vector4(0.12f, 0.12f, 0.12f, 0.88f);
             if ((Pressed and Hover) or Toggled)
-                fill = Vector4(0.18f, 0.24f, 0.30f, 0.92f);
+                fill = Vector4(0.24f, 0.24f, 0.24f, 0.92f);
             else if (Hover)
-                fill = Vector4(0.15f, 0.19f, 0.24f, 0.91f);
+                fill = Vector4(0.19f, 0.19f, 0.19f, 0.91f);
             renderer.ColorNP = fill;
             renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
 
-            renderer.ColorNP = Vector4(0.48f, 0.72f, 0.94f, Hover ? 0.90f : 0.62f);
+            renderer.ColorNP = Vector4(0.72f, 0.72f, 0.72f, Hover ? 0.90f : 0.62f);
             renderer.DrawImage(white, AABB2(pos.x, pos.y, 3.f, size.y));
             renderer.DrawImage(white, AABB2(pos.x + 3.f, pos.y + size.y - 1.f,
                                            size.x - 3.f, 1.f));
@@ -612,7 +612,7 @@ namespace spades {
             string caption = (expanded ? "[-]  " : "[+]  ") + text;
             Vector2 textSize = Font.Measure(caption);
             Font.DrawShadow(caption, pos + Vector2(12.f, (size.y - textSize.y) * 0.5f), 1.f,
-                            Vector4(0.94f, 0.97f, 1.f, 1.f),
+                            Vector4(0.97f, 0.97f, 0.97f, 1.f),
                             Vector4(0.f, 0.f, 0.f, 0.65f));
         }
     }

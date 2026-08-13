@@ -87,8 +87,8 @@ namespace spades {
 
     /** Dark, thin-bordered panel used by the remastered menu layout. */
     class MainScreenPanel : spades::ui::UIElement {
-        Vector4 FillColor = Vector4(0.015f, 0.018f, 0.022f, 0.82f);
-        Vector4 BorderColor = Vector4(0.72f, 0.76f, 0.80f, 0.42f);
+        Vector4 FillColor = Vector4(0.018f, 0.018f, 0.018f, 0.82f);
+        Vector4 BorderColor = Vector4(0.76f, 0.76f, 0.76f, 0.42f);
 
         MainScreenPanel(spades::ui::UIManager @manager) { super(manager); }
 
@@ -123,16 +123,16 @@ namespace spades {
             Vector2 size = Size;
             Image @white = renderer.RegisterImage("Gfx/White.tga");
 
-            Vector4 fill = Vector4(0.34f, 0.36f, 0.38f, 0.72f);
-            Vector4 edge = Vector4(0.83f, 0.85f, 0.87f, 0.25f);
+            Vector4 fill = Vector4(0.36f, 0.36f, 0.36f, 0.72f);
+            Vector4 edge = Vector4(0.85f, 0.85f, 0.85f, 0.25f);
             Vector4 text = Vector4(1.f, 1.f, 1.f, 1.f);
             if (IsExitButton) {
-                fill = Vector4(0.45f, 0.10f, 0.10f, 0.78f);
-                edge = Vector4(1.f, 0.40f, 0.35f, 0.38f);
+                fill = Vector4(0.28f, 0.28f, 0.28f, 0.78f);
+                edge = Vector4(0.72f, 0.72f, 0.72f, 0.38f);
             }
             if (!IsEnabled) {
                 fill *= Vector4(0.55f, 0.55f, 0.55f, 0.62f);
-                text = Vector4(0.66f, 0.68f, 0.70f, 0.72f);
+                text = Vector4(0.68f, 0.68f, 0.68f, 0.72f);
             } else if (Toggled || (Pressed && Hover)) {
                 fill += Vector4(0.18f, 0.18f, 0.18f, 0.08f);
                 edge = Vector4(1.f, 1.f, 1.f, 0.48f);

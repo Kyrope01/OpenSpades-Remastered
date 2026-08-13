@@ -116,11 +116,14 @@ namespace spades {
 			lens->Use();
 
 			const client::SceneDefinition &def = renderer->GetSceneDef();
+			// Preserve OpenSpades' mandatory ACES pass for HDR while allowing the
+			// separate filmic option to add the same tone curve to LDR rendering.
+			bool applyFilmicToneMapping = settings.r_hdr || settings.r_filmicToneMapping;
 
 			if (applyColorCorrection) {
 				tint.SetValue(tintVal.x, tintVal.y, tintVal.z);
 
-				if (settings.r_filmicToneMapping) {
+				if (applyFilmicToneMapping) {
 					// ACES tone mapping already enhances contrast, so use a lower
 					// secondary enhancement value when it is enabled.
 					if (settings.r_bloom) {
@@ -148,7 +151,7 @@ namespace spades {
 				enhancement.SetValue(0.f);
 			}
 
-			filmicToneMapping.SetValue(settings.r_filmicToneMapping ? 1.f : 0.f);
+			filmicToneMapping.SetValue(applyFilmicToneMapping ? 1.f : 0.f);
 
 			lensTexture.SetValue(0);
 			blurredTexture.SetValue(1);

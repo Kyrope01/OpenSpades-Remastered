@@ -82,9 +82,9 @@ namespace spades {
             Image @white = renderer.RegisterImage("Gfx/White.tga");
 
             Vector4 background = Vector4(1.f, 1.f, 1.f, 0.015f);
-            Vector4 foreground = Vector4(0.94f, 0.95f, 0.97f, 1.f);
+            Vector4 foreground = Vector4(0.95f, 0.95f, 0.95f, 1.f);
             if (item.Favorite) {
-                background = Vector4(0.22f, 0.34f, 0.68f, 0.22f);
+                background = Vector4(0.36f, 0.36f, 0.36f, 0.22f);
                 foreground = Vector4(1.f, 0.91f, 0.30f, 1.f);
             }
             if (Pressed && Hover) {
@@ -113,7 +113,7 @@ namespace spades {
             else if (item.NumPlayers >= item.MaxPlayers * 3 / 4)
                 playerColor = Vector4(1.f, 0.91f, 0.54f, 1.f);
             else if (item.NumPlayers == 0)
-                playerColor = Vector4(0.62f, 0.72f, 0.95f, 1.f);
+                playerColor = Vector4(0.72f, 0.72f, 0.72f, 1.f);
             Font.Draw(players, pos + Vector2((nameX - Font.Measure(players).x) * 0.5f, y), 1.f,
                       playerColor);
 
@@ -121,10 +121,10 @@ namespace spades {
                       pos + Vector2(nameX + inset, y), 1.f, foreground);
             Font.Draw(FitText(item.MapName, modeX - mapX - inset * 2.f),
                       pos + Vector2(mapX + inset, y), 1.f,
-                      Vector4(0.91f, 0.92f, 0.94f, 1.f));
+                      Vector4(0.92f, 0.92f, 0.92f, 1.f));
             Font.Draw(FitText(item.GameMode, pingX - modeX - inset * 2.f),
                       pos + Vector2(modeX + inset, y), 1.f,
-                      Vector4(0.91f, 0.92f, 0.94f, 1.f));
+                      Vector4(0.92f, 0.92f, 0.92f, 1.f));
 
             string ping = ToString(item.Ping);
             Vector4 pingColor(0.56f, 0.95f, 0.62f, 1.f);
@@ -206,7 +206,7 @@ namespace spades {
                 scale = Max(0.65f, availableWidth / textSize.x);
             Vector2 scaledTextSize = textSize * scale;
             Font.Draw(Text, pos + (size - scaledTextSize) * 0.5f, scale,
-                      Vector4(0.93f, 0.95f, 0.98f, 1.f));
+                      Vector4(0.95f, 0.95f, 0.95f, 1.f));
         }
     }
 
