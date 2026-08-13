@@ -154,62 +154,36 @@ namespace spades {
         }
     }
 
-    /** Reserved news/header area from the reference layout. */
-    class MainScreenNewsView : spades::ui::UIElement {
-        MainScreenNewsView(spades::ui::UIManager @manager) { super(manager); }
-
-        private void DrawCard(Renderer @renderer, Image @white, float x, float y, float w,
-                              float h, string title, Vector4 accent) {
-            Vector2 pos = ScreenPosition;
-            renderer.ColorNP = Vector4(0.10f, 0.11f, 0.13f, 0.86f);
-            renderer.DrawImage(white, AABB2(pos.x + x, pos.y + y, w, h));
-            renderer.ColorNP = accent;
-            renderer.DrawImage(white, AABB2(pos.x + x, pos.y + y, w, 3.f));
-            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.19f);
-            renderer.DrawImage(white, AABB2(pos.x + x, pos.y + y + h - 1.f, w, 1.f));
-            Font.DrawShadow(title, pos + Vector2(x + 8.f, y + h - 25.f), 1.f,
-                            Vector4(0.94f, 0.95f, 0.97f, 1.f),
-                            Vector4(0.f, 0.f, 0.f, 0.7f));
-        }
+    /** Standard button styling with a measured caption that always fits its current bounds. */
+    class MainScreenFittedButton : spades::ui::Button {
+        MainScreenFittedButton(spades::ui::UIManager @manager) { super(manager); }
 
         void Render() {
             Renderer @renderer = Manager.Renderer;
             Vector2 pos = ScreenPosition;
             Vector2 size = Size;
-            Image @white = renderer.RegisterImage("Gfx/White.tga");
+            Image @image = renderer.RegisterImage("Gfx/UI/Button.png");
 
-            renderer.ColorNP = Vector4(0.01f, 0.012f, 0.016f, 0.72f);
-            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
-            renderer.ColorNP = Vector4(0.82f, 0.85f, 0.90f, 0.35f);
-            renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
+            Vector4 color = Vector4(0.2f, 0.2f, 0.2f, 0.5f);
+            if (Toggled || (Pressed && Hover))
+                color = Vector4(0.7f, 0.7f, 0.7f, 0.9f);
+            else if (Hover)
+                color = Vector4(0.4f, 0.4f, 0.4f, 0.7f);
+            if (!IsEnabled)
+                color.w *= 0.5f;
+            renderer.ColorNP = color;
+            DrawSliceImage(renderer, image, pos.x, pos.y, size.x, size.y, 12.f);
 
-            Image @logo = renderer.RegisterImage("Gfx/Title/LogoSmall.png");
-            float logoScale = Min(1.f, (size.x * 0.34f) / float(logo.Width));
-            float logoW = float(logo.Width) * logoScale;
-            float logoH = float(logo.Height) * logoScale;
-            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.96f);
-            renderer.DrawImage(logo, AABB2(pos.x + 14.f, pos.y + 14.f, logoW, logoH));
-            Font.DrawShadow(_Tr("MainScreen", "REMASTERED CLIENT"),
-                            pos + Vector2(16.f, Min(size.y - 27.f, 88.f)), 1.f,
-                            Vector4(0.72f, 0.78f, 0.84f, 1.f),
-                            Vector4(0.f, 0.f, 0.f, 0.7f));
-
-            float cardsX = Max(215.f, size.x * 0.36f);
-            float gap = 7.f;
-            float cardsWidth = size.x - cardsX - 10.f;
-            float cardWidth = (cardsWidth - gap * 2.f) / 3.f;
-            float cardY = 9.f;
-            float cardH = size.y - 18.f;
-            if (cardWidth > 76.f) {
-                DrawCard(renderer, white, cardsX, cardY, cardWidth, cardH,
-                         _Tr("MainScreen", "REMASTERED"), Vector4(0.35f, 0.70f, 0.95f, 0.85f));
-                DrawCard(renderer, white, cardsX + cardWidth + gap, cardY, cardWidth, cardH,
-                         _Tr("MainScreen", "TRACER LIGHTS"),
-                         Vector4(1.f, 0.54f, 0.16f, 0.88f));
-                DrawCard(renderer, white, cardsX + (cardWidth + gap) * 2.f, cardY, cardWidth,
-                         cardH, _Tr("MainScreen", "DAMAGE FEEDBACK"),
-                         Vector4(0.95f, 0.28f, 0.24f, 0.88f));
-            }
+            Vector2 textSize = Font.Measure(Caption);
+            float scale = 1.f;
+            float availableWidth = Max(1.f, size.x - 16.f);
+            if (textSize.x > availableWidth)
+                scale = availableWidth / textSize.x;
+            Vector2 scaledTextSize = textSize * scale;
+            Vector2 textPosition = pos + (size - scaledTextSize) * 0.5f;
+            Vector4 textColor = Vector4(1.f, 1.f, 1.f, IsEnabled ? 1.f : 0.5f);
+            Font.DrawShadow(Caption, textPosition, scale, textColor,
+                            Vector4(0.f, 0.f, 0.f, IsEnabled ? 0.4f : 0.1f));
         }
     }
 
@@ -218,16 +192,10 @@ namespace spades {
 
         private MainScreenPanel @navigationPanel;
         private MainScreenPanel @browserPanel;
-        private MainScreenNewsView @newsView;
 
         private MainScreenNavigationButton @serversButton;
         private MainScreenNavigationButton @settingsButton;
         private MainScreenNavigationButton @controlsButton;
-        private MainScreenNavigationButton @skinsButton;
-        private MainScreenNavigationButton @macrosButton;
-        private MainScreenNavigationButton @videoRecordingButton;
-        private MainScreenNavigationButton @replaySettingsButton;
-        private MainScreenNavigationButton @demosButton;
         private MainScreenNavigationButton @creditsButton;
         private MainScreenNavigationButton @exitButton;
 
@@ -238,7 +206,7 @@ namespace spades {
         private spades::ui::Button @protocol75Button;
         private spades::ui::Button @protocol76Button;
 
-        private spades::ui::Label @serverListCaption;
+        private MainScreenFittedButton @serverListSourceButton;
         private spades::ui::Field @serverFilterField;
         private MainScreenDropDownButton @filterPlayersButton;
         private MainScreenDropDownButton @filterVersionButton;
@@ -261,10 +229,14 @@ namespace spades {
 
         private int sortIndex = 1;
         private bool sortDescending = true;
+        private int serverListSource = 0;
 
         private ConfigItem cg_protocolVersion("cg_protocolVersion", "3");
         private ConfigItem cg_lastQuickConnectHost("cg_lastQuickConnectHost", "127.0.0.1");
         private ConfigItem cg_serverlistSort("cg_serverlistSort", "16385");
+        private ConfigItem cg_serverListSource("cg_serverListSource", "0");
+        private ConfigItem cl_serverListUrl(
+            "cl_serverListUrl", "http://services.buildandshoot.com/serverlist.json");
 
         MainScreenMainMenu(MainScreenUI @ui) {
             super(ui.manager);
@@ -275,36 +247,23 @@ namespace spades {
             if (sortIndex < 0 || sortIndex > 4)
                 sortIndex = 1;
             sortDescending = (savedSort & 0x4000) != 0;
+            serverListSource = cg_serverListSource.IntValue == 1 ? 1 : 0;
+            ApplyServerListSource();
 
             @navigationPanel = MainScreenPanel(Manager);
             AddChild(navigationPanel);
             @browserPanel = MainScreenPanel(Manager);
             AddChild(browserPanel);
-            @newsView = MainScreenNewsView(Manager);
-            AddChild(newsView);
 
             @serversButton = MakeNavigationButton(_Tr("MainScreen", "Servers"));
             serversButton.Toggle = true;
             serversButton.Toggled = true;
+            @serversButton.Activated = spades::ui::EventHandler(this.ServersButtonPressed);
 
             @settingsButton = MakeNavigationButton(_Tr("MainScreen", "Settings"));
             @settingsButton.Activated = spades::ui::EventHandler(this.SettingsButtonPressed);
             @controlsButton = MakeNavigationButton(_Tr("MainScreen", "Controls"));
             @controlsButton.Activated = spades::ui::EventHandler(this.ControlsButtonPressed);
-
-            // These entries are part of the reference navigation hierarchy, but the current
-            // OpenSpades runtime has no corresponding main-screen feature. Keep them visible and
-            // deliberately disabled instead of attaching misleading placeholder actions.
-            @skinsButton = MakeNavigationButton(_Tr("MainScreen", "Skins"));
-            skinsButton.Enable = false;
-            @macrosButton = MakeNavigationButton(_Tr("MainScreen", "Macros"));
-            macrosButton.Enable = false;
-            @videoRecordingButton = MakeNavigationButton(_Tr("MainScreen", "Video Recording"));
-            videoRecordingButton.Enable = false;
-            @replaySettingsButton = MakeNavigationButton(_Tr("MainScreen", "Replay Settings"));
-            replaySettingsButton.Enable = false;
-            @demosButton = MakeNavigationButton(_Tr("MainScreen", "Demos"));
-            demosButton.Enable = false;
 
             @creditsButton = MakeNavigationButton(_Tr("MainScreen", "Credits"));
             @creditsButton.Activated = spades::ui::EventHandler(this.CreditsButtonPressed);
@@ -345,11 +304,11 @@ namespace spades {
             @refreshButton.Activated = spades::ui::EventHandler(this.RefreshButtonPressed);
             AddChild(refreshButton);
 
-            @serverListCaption = spades::ui::Label(Manager);
-            serverListCaption.Text = _Tr("MainScreen", "Serverlist: Master");
-            serverListCaption.Alignment = Vector2(0.f, 0.5f);
-            serverListCaption.BackgroundColor = Vector4(0.04f, 0.05f, 0.06f, 0.72f);
-            AddChild(serverListCaption);
+            @serverListSourceButton = MainScreenFittedButton(Manager);
+            serverListSourceButton.Caption = GetServerListSourceCaption();
+            @serverListSourceButton.Activated =
+                spades::ui::EventHandler(this.ServerListSourceButtonPressed);
+            AddChild(serverListSourceButton);
 
             @serverFilterField = spades::ui::Field(Manager);
             serverFilterField.Placeholder = _Tr("MainScreen", "Search servers");
@@ -411,6 +370,27 @@ namespace spades {
             return header;
         }
 
+        private string GetServerListSourceCaption() {
+            if (serverListSource == 0)
+                return _Tr("MainScreen", "Serverlist: Master");
+            return _Tr("MainScreen", "Serverlist: checkpoint.aos.coffee");
+        }
+
+        private void ApplyServerListSource() {
+            cg_serverListSource = serverListSource;
+            if (serverListSource == 0)
+                cl_serverListUrl = "http://services.buildandshoot.com/serverlist.json";
+            else
+                cl_serverListUrl = "http://checkpoint.aos.coffee/serverlist.json";
+        }
+
+        private void UpdateServerListSourceCaption(int count) {
+            string caption = GetServerListSourceCaption();
+            if (count >= 0)
+                caption += " (" + ToString(count) + ")";
+            serverListSourceButton.Caption = caption;
+        }
+
         void OnResized() {
             float margin = 6.f;
             float gap = 8.f;
@@ -428,9 +408,7 @@ namespace spades {
             float navGap = 4.f;
             float navButtonWidth = navigationWidth - navInset * 2.f;
             spades::ui::UIElement @[] navButtons = {
-                serversButton,         settingsButton, controlsButton, skinsButton,
-                macrosButton,          videoRecordingButton, replaySettingsButton,
-                demosButton,           creditsButton, exitButton
+                serversButton, settingsButton, controlsButton, creditsButton, exitButton
             };
             for (uint i = 0; i < navButtons.length; i++) {
                 navButtons[i].Bounds =
@@ -441,10 +419,10 @@ namespace spades {
             float contentInset = 4.f;
             float contentX = browserX + contentInset;
             float contentWidth = browserWidth - contentInset * 2.f;
-            float newsHeight = Clamp(Size.y * 0.30f, 116.f, 164.f);
-            newsView.Bounds = AABB2(contentX, margin + contentInset, contentWidth, newsHeight);
 
-            float toolbarY = margin + contentInset + newsHeight + 6.f;
+            // The server browser begins at the top of the content panel. The old showcase/news
+            // strip was decorative and needlessly reduced the number of visible servers.
+            float toolbarY = margin + contentInset;
             float toolbarHeight = 30.f;
             float toolbarGap = 4.f;
             // Scale every action before sacrificing the address field. At the minimum supported
@@ -470,13 +448,13 @@ namespace spades {
 
             float filterY = toolbarY + toolbarHeight + 5.f;
             float filterHeight = 27.f;
-            float captionWidth = Clamp(contentWidth * 0.23f, 80.f, 168.f);
+            float sourceWidth = Clamp(contentWidth * 0.30f, 125.f, 230.f);
             float versionWidth = Clamp(contentWidth * 0.20f, 75.f, 98.f);
             float playersWidth = Clamp(contentWidth * 0.27f, 105.f, 148.f);
-            float searchWidth = contentWidth - captionWidth - playersWidth - versionWidth - 9.f;
-            serverListCaption.Bounds = AABB2(contentX, filterY, captionWidth, filterHeight);
+            float searchWidth = contentWidth - sourceWidth - playersWidth - versionWidth - 9.f;
+            serverListSourceButton.Bounds = AABB2(contentX, filterY, sourceWidth, filterHeight);
             serverFilterField.Bounds =
-                AABB2(contentX + captionWidth + 3.f, filterY, searchWidth, filterHeight);
+                AABB2(contentX + sourceWidth + 3.f, filterY, searchWidth, filterHeight);
             filterPlayersButton.Bounds = AABB2(contentX + contentWidth - playersWidth -
                                                    versionWidth - 3.f,
                                                filterY, playersWidth, filterHeight);
@@ -486,22 +464,25 @@ namespace spades {
             float headerY = filterY + filterHeight + 4.f;
             float headerHeight = 25.f;
             float columnWidth = contentWidth - serverListView.ScrollBarWidth;
-            float playersX = 0.f;
-            float nameX = columnWidth * 0.11f;
-            float mapX = columnWidth * 0.57f;
-            float modeX = columnWidth * 0.77f;
-            float pingX = columnWidth * 0.91f;
+            float playersColumnWidth = ServerListPlayersColumnWidth(columnWidth);
+            float nameColumnWidth = ServerListNameColumnWidth(columnWidth);
+            float mapColumnWidth = ServerListMapColumnWidth(columnWidth);
+            float modeColumnWidth = ServerListModeColumnWidth(columnWidth);
+            float pingColumnWidth = ServerListPingColumnWidth(columnWidth);
+            float nameX = playersColumnWidth;
+            float mapX = nameX + nameColumnWidth;
+            float modeX = mapX + mapColumnWidth;
+            float pingX = modeX + modeColumnWidth;
             serverListPlayersHeader.Bounds =
-                AABB2(contentX + playersX + 4.f, headerY, nameX - playersX - 8.f, headerHeight);
+                AABB2(contentX, headerY, playersColumnWidth, headerHeight);
             serverListNameHeader.Bounds =
-                AABB2(contentX + nameX + 4.f, headerY, mapX - nameX - 8.f, headerHeight);
+                AABB2(contentX + nameX, headerY, nameColumnWidth, headerHeight);
             serverListMapHeader.Bounds =
-                AABB2(contentX + mapX + 4.f, headerY, modeX - mapX - 8.f, headerHeight);
+                AABB2(contentX + mapX, headerY, mapColumnWidth, headerHeight);
             serverListModeHeader.Bounds =
-                AABB2(contentX + modeX + 4.f, headerY, pingX - modeX - 8.f, headerHeight);
+                AABB2(contentX + modeX, headerY, modeColumnWidth, headerHeight);
             serverListPingHeader.Bounds =
-                AABB2(contentX + pingX + 4.f, headerY, columnWidth - pingX - 8.f,
-                      headerHeight);
+                AABB2(contentX + pingX, headerY, pingColumnWidth, headerHeight);
 
             float listY = headerY + headerHeight;
             float listHeight = margin + fullHeight - contentInset - listY;
@@ -546,7 +527,21 @@ namespace spades {
             }
         }
 
+        private void ServersButtonPressed(spades::ui::UIElement @sender) {
+            serversButton.Toggled = true;
+            LoadServerList();
+        }
+
         private void RefreshButtonPressed(spades::ui::UIElement @sender) { LoadServerList(); }
+
+        private void ServerListSourceButtonPressed(spades::ui::UIElement @sender) {
+            if (serverListLoading)
+                return;
+            serverListSource = serverListSource == 0 ? 1 : 0;
+            ApplyServerListSource();
+            UpdateServerListSourceCaption(-1);
+            LoadServerList();
+        }
 
         private void SettingsButtonPressed(spades::ui::UIElement @sender) {
             PreferenceViewOptions options;
@@ -666,8 +661,7 @@ namespace spades {
                 if (good)
                     list2.insertLast(item);
             }
-            serverListCaption.Text = _Tr("MainScreen", "Serverlist: Master") + " (" +
-                                     ToString(list2.length) + ")";
+            UpdateServerListSourceCaption(int(list2.length));
 
             ServerListModel model(Manager, list2);
             @model.ItemActivated = ServerListItemEventHandler(this.ServerListItemActivated);
@@ -689,7 +683,8 @@ namespace spades {
             serverListLoadingView.Visible = true;
             serverListErrorView.Visible = false;
             serverListView.Visible = false;
-            serverListCaption.Text = _Tr("MainScreen", "Serverlist: Master");
+            serverListSourceButton.Enable = false;
+            UpdateServerListSourceCaption(-1);
         }
 
         void PollServerListState() {
@@ -701,6 +696,7 @@ namespace spades {
             @selectedServer = null;
             serverListLoaded = true;
             serverListLoading = false;
+            serverListSourceButton.Enable = true;
             MainScreenServerItem @[] @list = ui.helper.GetServerList("", false);
             if (list is null || list.length == 0) {
                 serverListSuccess = false;

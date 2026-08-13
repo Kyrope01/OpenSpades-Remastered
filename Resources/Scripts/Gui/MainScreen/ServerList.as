@@ -22,6 +22,37 @@
 
 namespace spades {
 
+    // Shared responsive column geometry keeps row contents and all five sort buttons aligned.
+    // Widths match KyroSpades' proportions at normal resolutions while retaining readable minimums
+    // when possible. Scaling those minimums together also guarantees that columns never overflow.
+    float ServerListMinimumColumnScale(float width) {
+        return Clamp(width / 285.f, 0.f, 1.f);
+    }
+
+    float ServerListPlayersColumnWidth(float width) {
+        return Clamp(width * 0.12f, 70.f, 125.f) * ServerListMinimumColumnScale(width);
+    }
+
+    float ServerListMapColumnWidth(float width) {
+        return Clamp(width * 0.22f, 70.f, 220.f) * ServerListMinimumColumnScale(width);
+    }
+
+    float ServerListModeColumnWidth(float width) {
+        return Clamp(width * 0.117f, 55.f, 125.f) * ServerListMinimumColumnScale(width);
+    }
+
+    float ServerListPingColumnWidth(float width) {
+        return Clamp(width * 0.125f, 50.f, 110.f) * ServerListMinimumColumnScale(width);
+    }
+
+    float ServerListNameColumnWidth(float width) {
+        float scale = ServerListMinimumColumnScale(width);
+        return Max(40.f * scale, width - ServerListPlayersColumnWidth(width) -
+                                        ServerListMapColumnWidth(width) -
+                                        ServerListModeColumnWidth(width) -
+                                        ServerListPingColumnWidth(width));
+    }
+
     class ServerListItem : spades::ui::ButtonBase {
         MainScreenServerItem @item;
 
@@ -36,6 +67,8 @@ namespace spades {
             if (Font.Measure(text).x <= width)
                 return text;
             string ellipsis = "...";
+            if (Font.Measure(ellipsis).x > width)
+                return "";
             while (text.length > 0 && Font.Measure(text + ellipsis).x > width) {
                 text = text.substr(0, text.length - 1);
             }
@@ -64,12 +97,12 @@ namespace spades {
             renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.045f);
             renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
 
-            // The reference order is Players, Name, Map, Mode, Ping. Percentages keep the
-            // columns aligned at 960x540 while allowing the right-hand browser to grow.
-            float nameX = size.x * 0.11f;
-            float mapX = size.x * 0.57f;
-            float modeX = size.x * 0.77f;
-            float pingX = size.x * 0.91f;
+            // The reference order is Players, Name, Map, Mode, Ping. Use the exact same
+            // responsive geometry as the clickable headers so every control remains aligned.
+            float nameX = ServerListPlayersColumnWidth(size.x);
+            float mapX = nameX + ServerListNameColumnWidth(size.x);
+            float modeX = mapX + ServerListMapColumnWidth(size.x);
+            float pingX = modeX + ServerListModeColumnWidth(size.x);
             float y = 2.f;
             float inset = 5.f;
 
@@ -166,7 +199,14 @@ namespace spades {
             renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.13f);
             renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
 
-            Font.Draw(Text, pos + Vector2(4.f, 3.f), 1.f, Vector4(0.93f, 0.95f, 0.98f, 1.f));
+            float scale = 1.f;
+            Vector2 textSize = Font.Measure(Text);
+            float availableWidth = Max(1.f, size.x - 8.f);
+            if (textSize.x > availableWidth)
+                scale = Max(0.65f, availableWidth / textSize.x);
+            Vector2 scaledTextSize = textSize * scale;
+            Font.Draw(Text, pos + (size - scaledTextSize) * 0.5f, scale,
+                      Vector4(0.93f, 0.95f, 0.98f, 1.f));
         }
     }
 

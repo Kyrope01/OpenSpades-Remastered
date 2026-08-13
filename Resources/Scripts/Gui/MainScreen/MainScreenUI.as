@@ -154,8 +154,8 @@ namespace spades {
                                    AABB2(0.f, 0.f, renderer.ScreenWidth, renderer.ScreenHeight));
             }
 
-            // The remastered menu owns its logo inside the right-hand news panel. Keeping the
-            // world backdrop free of a centered overlay also makes the two-column hierarchy clear.
+            // Keep the world backdrop free of centered showcase overlays so the compact left
+            // navigation and full-height server browser remain the clear visual hierarchy.
             manager.RunFrame(dt);
             manager.Render();
 

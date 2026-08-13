@@ -771,6 +771,7 @@ namespace spades {
 
     class GameOptionsPanel : spades::ui::UIElement {
         private spades::ui::ListView @listView;
+        private ConfigItem cg_damageIndicators("cg_damageIndicators");
 
         GameOptionsPanel(spades::ui::UIManager @manager, PreferenceViewOptions @options,
                          FontManager @fontManager) {
@@ -787,11 +788,12 @@ namespace spades {
             layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
                                     ConfigNumberFormatter(0, " deg"));
             layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
-            layouter.AddChoiceField(_Tr("Preferences", "Damage Numbers"), "cg_damageIndicators",
-                                    array<string> = {_Tr("Preferences", "OFF"),
-                                                     _Tr("Preferences", "ON"),
-                                                     _Tr("Preferences", "Grenades")},
-                                    array<int> = {0, 1, 2});
+            // Damage Numbers is a normal on/off feature in this client. Migrate the old
+            // grenade-inclusive value so the retained two-button setting always has a selected
+            // state.
+            if (cg_damageIndicators.IntValue > 1)
+                cg_damageIndicators = 1;
+            layouter.AddToggleField(_Tr("Preferences", "Damage Numbers"), "cg_damageIndicators");
             layouter.AddSliderField(_Tr("Preferences", "Tracer Light Intensity"),
                                     "cg_tracerLightIntensity", 0, 4, 0.1,
                                     ConfigNumberFormatter(1, "x"));
