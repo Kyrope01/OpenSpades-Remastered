@@ -151,11 +151,8 @@ namespace spades {
                                    AABB2(0.f, 0.f, renderer.ScreenWidth, renderer.ScreenHeight));
             }
 
-            // draw title logo
-            Image @img = renderer.RegisterImage("Gfx/Title/Logo.png");
-            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 1.f);
-            renderer.DrawImage(img, Vector2((renderer.ScreenWidth - img.Width) * 0.5f, 64.f));
-
+            // The remastered menu owns its logo inside the right-hand news panel. Keeping the
+            // world backdrop free of a centered overlay also makes the two-column hierarchy clear.
             manager.RunFrame(dt);
             manager.Render();
 

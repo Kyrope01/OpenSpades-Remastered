@@ -22,15 +22,24 @@ namespace spades {
 
     class PreferenceViewOptions {
         bool GameActive = false;
+        /** 0 = Settings, 1 = Controls, 2 = System. */
+        int InitialTabIndex = 0;
     }
 
     class PreferenceView : spades::ui::UIElement {
         private spades::ui::UIElement @owner;
 
         private PreferenceTab @[] tabs;
+        private PreferenceTabButton @[] sectionButtons;
+        private int[] sectionGroups;
+        private int[] sectionRows;
+        private bool[] groupExpanded;
+        private int selectedSectionIndex = -1;
+        private PreferenceTabButton @backButton;
+        private spades::ui::Label @shade;
+
         float ContentsLeft, ContentsWidth;
         float ContentsTop, ContentsHeight;
-
         int SelectedTabIndex = 0;
 
         spades::ui::EventHandler @Closed;
@@ -40,75 +49,188 @@ namespace spades {
             super(owner.Manager);
             @this.owner = owner;
             this.Bounds = owner.Bounds;
-            ContentsWidth = 800.f;
-            ContentsLeft = (Manager.Renderer.ScreenWidth - ContentsWidth) * 0.5f;
-            ContentsHeight = 550.f;
-            ContentsTop = (Manager.Renderer.ScreenHeight - ContentsHeight) * 0.5f;
 
-            {
-                spades::ui::Label label(Manager);
-                label.BackgroundColor = Vector4(0, 0, 0, 0.4f);
-                label.Bounds = Bounds;
-                AddChild(label);
-            }
-            {
-                spades::ui::Label label(Manager);
-                label.BackgroundColor = Vector4(0, 0, 0, 0.8f);
-                label.Bounds = AABB2(0.f, ContentsTop - 13.f, Size.x, ContentsHeight + 27.f);
-                AddChild(label);
-            }
+            // Use the same near-full-screen panel hierarchy as the server browser: a narrow
+            // navigation rail on the left and one large content panel on the right.
+            ContentsLeft = 6.f;
+            ContentsTop = 6.f;
+            ContentsWidth = Max(320.f, Size.x - 12.f);
+            ContentsHeight = Max(348.f, Size.y - 12.f);
+
+            spades::ui::Label backgroundShade(Manager);
+            backgroundShade.BackgroundColor = Vector4(0.f, 0.f, 0.f, 0.72f);
+            backgroundShade.Bounds = AABB2(0.f, 0.f, Size.x, Size.y);
+            AddChild(backgroundShade);
+            @shade = backgroundShade;
 
             AddTab(GameOptionsPanel(Manager, options, fontManager),
-                   _Tr("Preferences", "Game Options"));
+                   _Tr("Preferences", "Settings"));
             AddTab(ControlOptionsPanel(Manager, options, fontManager),
                    _Tr("Preferences", "Controls"));
-            AddTab(MiscOptionsPanel(Manager, options, fontManager), _Tr("Preferences", "Misc"));
+            AddTab(MiscOptionsPanel(Manager, options, fontManager),
+                   _Tr("Preferences", "System"));
 
-            {
-                PreferenceTabButton button(Manager);
-                button.Caption = _Tr("Preferences", "Back");
-                button.Bounds =
-                    AABB2(ContentsLeft + 10.f, ContentsTop + 10.f + float(tabs.length) * 32.f + 5.f,
-                          150.f, 30.f);
-                button.Alignment = Vector2(0.f, 0.5f);
-                @button.Activated = spades::ui::EventHandler(this.OnClosePressed);
-                AddChild(button);
-            }
+            // Expandable/dropdown subcategories. Selecting one also scrolls its existing
+            // OpenSpades settings panel to the corresponding heading.
+            AddSection(0, _Tr("Preferences", "Player Information"), 0);
+            AddSection(0, _Tr("Preferences", "Remastered Features"), 2);
+            AddSection(0, _Tr("Preferences", "Effects"), 8);
+            AddSection(0, _Tr("Preferences", "Feedbacks"), 15);
+            AddSection(0, _Tr("Preferences", "AoS Compatibility"), 19);
+            AddSection(0, _Tr("Preferences", "Misc"), 22);
 
+            AddSection(1, _Tr("Preferences", "Weapons/Tools"), 0);
+            AddSection(1, _Tr("Preferences", "Movement"), 16);
+            AddSection(1, _Tr("Preferences", "Misc"), 25);
+
+            AddSection(2, _Tr("Preferences", "Startup Window"), 0);
+
+            PreferenceTabButton close(Manager);
+            close.Caption = _Tr("Preferences", "Back");
+            close.IsBackButton = true;
+            @close.Activated = spades::ui::EventHandler(this.OnClosePressed);
+            AddChild(close);
+            @backButton = close;
+
+            SelectedTabIndex = Clamp(options.InitialTabIndex, 0, int(tabs.length) - 1);
+            for (uint i = 0; i < groupExpanded.length; i++)
+                groupExpanded[i] = int(i) == SelectedTabIndex;
+            selectedSectionIndex = FirstSectionInGroup(SelectedTabIndex);
+
+            LayoutContents();
             UpdateTabs();
         }
 
         private void AddTab(spades::ui::UIElement @view, string caption) {
             PreferenceTab tab(this, view);
-            int order = int(tabs.length);
-            tab.TabButton.Bounds =
-                AABB2(ContentsLeft + 10.f, ContentsTop + 10.f + float(order) * 32.f, 150.f, 30.f);
+            tab.Caption = caption;
             tab.TabButton.Caption = caption;
-            tab.View.Bounds = AABB2(ContentsLeft + 170.f, ContentsTop + 10.f, ContentsWidth - 180.f,
-                                    ContentsHeight - 20.f);
             tab.View.Visible = false;
-            @tab.TabButton.Activated = spades::ui::EventHandler(this.OnTabButtonActivated);
+            @tab.TabButton.Activated = spades::ui::EventHandler(this.OnGroupButtonActivated);
             AddChild(tab.View);
             AddChild(tab.TabButton);
             tabs.insertLast(tab);
+            groupExpanded.insertLast(false);
         }
 
-        private void OnTabButtonActivated(spades::ui::UIElement @sender) {
-            for (uint i = 0; i < tabs.length; i++) {
-                if (cast<spades::ui::UIElement>(tabs[i].TabButton) is sender) {
-                    SelectedTabIndex = i;
-                    UpdateTabs();
+        private void AddSection(int group, string caption, int row) {
+            PreferenceTabButton button(Manager);
+            button.Caption = "    " + caption;
+            button.IsSectionButton = true;
+            button.Toggle = true;
+            @button.Activated = spades::ui::EventHandler(this.OnSectionButtonActivated);
+            AddChild(button);
+            sectionButtons.insertLast(button);
+            sectionGroups.insertLast(group);
+            sectionRows.insertLast(row);
+        }
+
+        private int FirstSectionInGroup(int group) {
+            for (uint i = 0; i < sectionButtons.length; i++) {
+                if (sectionGroups[i] == group)
+                    return int(i);
+            }
+            return -1;
+        }
+
+        private void LayoutContents() {
+            ContentsWidth = Max(320.f, Size.x - 12.f);
+            ContentsHeight = Max(348.f, Size.y - 12.f);
+            float sidebarWidth = Clamp(ContentsWidth * 0.22f, 150.f, 205.f);
+            float y = ContentsTop + 6.f;
+            float rowHeight = 29.f;
+            float rowGap = 3.f;
+
+            for (uint group = 0; group < tabs.length; group++) {
+                tabs[group].TabButton.Caption =
+                    tabs[group].Caption + (groupExpanded[group] ? "  [-]" : "  [+]");
+                tabs[group].TabButton.Bounds =
+                    AABB2(ContentsLeft + 5.f, y, sidebarWidth - 10.f, rowHeight);
+                y += rowHeight + rowGap;
+
+                for (uint section = 0; section < sectionButtons.length; section++) {
+                    if (sectionGroups[section] != int(group))
+                        continue;
+                    sectionButtons[section].Visible = groupExpanded[group];
+                    if (groupExpanded[group]) {
+                        sectionButtons[section].Bounds =
+                            AABB2(ContentsLeft + 5.f, y, sidebarWidth - 10.f, rowHeight - 2.f);
+                        y += rowHeight;
+                    }
                 }
+            }
+
+            backButton.Bounds = AABB2(ContentsLeft + 5.f,
+                                      ContentsTop + ContentsHeight - rowHeight - 6.f,
+                                      sidebarWidth - 10.f, rowHeight);
+
+            float viewX = ContentsLeft + sidebarWidth + 6.f;
+            float viewWidth = ContentsWidth - sidebarWidth - 11.f;
+            for (uint i = 0; i < tabs.length; i++) {
+                tabs[i].View.Bounds = AABB2(viewX, ContentsTop + 6.f, viewWidth,
+                                            ContentsHeight - 12.f);
+            }
+        }
+
+        void OnResized() {
+            if (shade !is null)
+                shade.Bounds = AABB2(0.f, 0.f, Size.x, Size.y);
+            if (tabs.length > 0)
+                LayoutContents();
+            UIElement::OnResized();
+        }
+
+        private void OnGroupButtonActivated(spades::ui::UIElement @sender) {
+            for (uint i = 0; i < tabs.length; i++) {
+                if (cast<spades::ui::UIElement>(tabs[i].TabButton) !is sender)
+                    continue;
+
+                if (SelectedTabIndex == int(i))
+                    groupExpanded[i] = !groupExpanded[i];
+                else {
+                    for (uint group = 0; group < groupExpanded.length; group++)
+                        groupExpanded[group] = group == i;
+                    SelectedTabIndex = int(i);
+                    selectedSectionIndex = FirstSectionInGroup(int(i));
+                    ScrollSelectedPanelTo(0);
+                }
+                LayoutContents();
+                UpdateTabs();
+                return;
+            }
+        }
+
+        private void OnSectionButtonActivated(spades::ui::UIElement @sender) {
+            for (uint i = 0; i < sectionButtons.length; i++) {
+                if (cast<spades::ui::UIElement>(sectionButtons[i]) !is sender)
+                    continue;
+                SelectedTabIndex = sectionGroups[i];
+                selectedSectionIndex = int(i);
+                groupExpanded[SelectedTabIndex] = true;
+                ScrollSelectedPanelTo(sectionRows[i]);
+                UpdateTabs();
+                return;
+            }
+        }
+
+        private void ScrollSelectedPanelTo(int row) {
+            if (SelectedTabIndex == 0) {
+                GameOptionsPanel @panel = cast<GameOptionsPanel>(tabs[0].View);
+                panel.ScrollToSection(row);
+            } else if (SelectedTabIndex == 1) {
+                ControlOptionsPanel @panel = cast<ControlOptionsPanel>(tabs[1].View);
+                panel.ScrollToSection(row);
             }
         }
 
         private void UpdateTabs() {
             for (uint i = 0; i < tabs.length; i++) {
-                PreferenceTab @tab = tabs[i];
                 bool selected = SelectedTabIndex == int(i);
-                tab.TabButton.Toggled = selected;
-                tab.View.Visible = selected;
+                tabs[i].TabButton.Toggled = selected;
+                tabs[i].View.Visible = selected;
             }
+            for (uint i = 0; i < sectionButtons.length; i++)
+                sectionButtons[i].Toggled = int(i) == selectedSectionIndex;
         }
 
         private void OnClosePressed(spades::ui::UIElement @sender) { Close(); }
@@ -119,27 +241,37 @@ namespace spades {
         }
 
         void HotKey(string key) {
-            if (key == "Escape") {
+            if (key == "Escape")
                 Close();
-            } else {
+            else
                 UIElement::HotKey(key);
-            }
         }
 
         void Render() {
             Vector2 pos = ScreenPosition;
-            Vector2 size = Size;
-            Renderer @r = Manager.Renderer;
-            Image @img = r.RegisterImage("Gfx/White.tga");
+            Renderer @renderer = Manager.Renderer;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
+            float sidebarWidth = Clamp(ContentsWidth * 0.22f, 150.f, 205.f);
 
-            r.ColorNP = Vector4(1, 1, 1, 0.08f);
-            r.DrawImage(img, AABB2(pos.x, pos.y + ContentsTop - 15.f, size.x, 1.f));
-            r.DrawImage(img,
-                        AABB2(pos.x, pos.y + ContentsTop + ContentsHeight + 15.f, size.x, 1.f));
-            r.ColorNP = Vector4(1, 1, 1, 0.2f);
-            r.DrawImage(img, AABB2(pos.x, pos.y + ContentsTop - 14.f, size.x, 1.f));
-            r.DrawImage(img,
-                        AABB2(pos.x, pos.y + ContentsTop + ContentsHeight + 14.f, size.x, 1.f));
+            renderer.ColorNP = Vector4(0.012f, 0.015f, 0.019f, 0.94f);
+            renderer.DrawImage(white,
+                               AABB2(pos.x + ContentsLeft, pos.y + ContentsTop, ContentsWidth,
+                                     ContentsHeight));
+            renderer.ColorNP = Vector4(0.77f, 0.81f, 0.85f, 0.38f);
+            renderer.DrawImage(white,
+                               AABB2(pos.x + ContentsLeft, pos.y + ContentsTop, ContentsWidth, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x + ContentsLeft,
+                                           pos.y + ContentsTop + ContentsHeight - 1.f,
+                                           ContentsWidth, 1.f));
+            renderer.DrawImage(white,
+                               AABB2(pos.x + ContentsLeft, pos.y + ContentsTop, 1.f,
+                                     ContentsHeight));
+            renderer.DrawImage(white, AABB2(pos.x + ContentsLeft + ContentsWidth - 1.f,
+                                           pos.y + ContentsTop, 1.f, ContentsHeight));
+            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.18f);
+            renderer.DrawImage(white, AABB2(pos.x + ContentsLeft + sidebarWidth,
+                                           pos.y + ContentsTop + 1.f, 1.f,
+                                           ContentsHeight - 2.f));
 
             UIElement::Render();
         }
@@ -157,37 +289,53 @@ namespace spades {
     }
 
     class PreferenceTabButton : spades::ui::Button {
+        bool IsSectionButton = false;
+        bool IsBackButton = false;
+
         PreferenceTabButton(spades::ui::UIManager @manager) {
             super(manager);
             Alignment = Vector2(0.f, 0.5f);
         }
-        /*
+
         void Render() {
-                Renderer@ renderer = Manager.Renderer;
-                Vector2 pos = ScreenPosition;
-                Vector2 size = Size;
+            Renderer @renderer = Manager.Renderer;
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
 
-                Vector4 color = Vector4(0.2f, 0.2f, 0.2f, 0.5f);
-                if(Toggled or (Pressed and Hover)) {
-                        color = Vector4(0.7f, 0.7f, 0.7f, 0.9f);
-                }else if(Hover) {
-                        color = Vector4(0.4f, 0.4f, 0.4f, 0.7f);
-                }
+            Vector4 fill = IsSectionButton ? Vector4(0.12f, 0.13f, 0.15f, 0.72f)
+                                           : Vector4(0.31f, 0.33f, 0.35f, 0.78f);
+            Vector4 edge = Vector4(1.f, 1.f, 1.f, 0.16f);
+            if (IsBackButton) {
+                fill = Vector4(0.43f, 0.10f, 0.10f, 0.82f);
+                edge = Vector4(1.f, 0.38f, 0.32f, 0.38f);
+            } else if (Toggled || (Pressed && Hover)) {
+                fill += Vector4(0.19f, 0.19f, 0.19f, 0.08f);
+                edge = Vector4(0.70f, 0.84f, 1.f, 0.50f);
+            } else if (Hover) {
+                fill += Vector4(0.10f, 0.10f, 0.10f, 0.06f);
+            }
 
-                Font@ font = this.Font;
-                string text = this.Caption;
-                Vector2 txtSize = font.Measure(text);
-                Vector2 txtPos;
-                txtPos.y = pos.y + (size.y - txtSize.y) * 0.5f;
+            renderer.ColorNP = fill;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
+            renderer.ColorNP = edge;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, 1.f, size.y));
+            renderer.DrawImage(white, AABB2(pos.x + size.x - 1.f, pos.y, 1.f, size.y));
 
-                font.DrawShadow(text, txtPos, 1.f,
-                        color, Vector4(0.f, 0.f, 0.f, 0.4f));
-        }*/
+            float left = IsSectionButton ? 8.f : 10.f;
+            Vector2 textSize = Font.Measure(Caption);
+            Font.DrawShadow(Caption, pos + Vector2(left, (size.y - textSize.y) * 0.5f), 1.f,
+                            Vector4(0.96f, 0.97f, 0.99f, 1.f),
+                            Vector4(0.f, 0.f, 0.f, 0.55f));
+        }
     }
 
     class PreferenceTab {
         spades::ui::UIElement @View;
         PreferenceTabButton @TabButton;
+        string Caption;
 
         PreferenceTab(PreferenceView @parent, spades::ui::UIElement @view) {
             @View = view;
@@ -486,11 +634,15 @@ namespace spades {
         StandardPreferenceLayouter(spades::ui::UIElement @parent, FontManager @fontManager) {
             @Parent = parent;
             @this.fontManager = fontManager;
+
+            float availableWidth = Max(340.f, Parent.Manager.Renderer.ScreenWidth - 235.f);
+            FieldX = Clamp(availableWidth * 0.42f, 150.f, 330.f);
+            FieldWidth = Max(160.f, availableWidth - FieldX - 28.f);
         }
 
         private spades::ui::UIElement @CreateItem() {
             spades::ui::UIElement elem(Parent.Manager);
-            elem.Size = Vector2(300.f, 32.f);
+            elem.Size = Vector2(FieldX + FieldWidth + 20.f, 32.f);
             items.insertLast(elem);
             return elem;
         }
@@ -516,7 +668,7 @@ namespace spades {
             label.Text = text;
             label.Alignment = Vector2(0.f, 1.f);
             @label.Font = fontManager.HeadingFont;
-            label.Bounds = AABB2(10.f, 0.f, 300.f, 32.f);
+            label.Bounds = AABB2(10.f, 0.f, FieldX - 20.f, 32.f);
             container.AddChild(label);
         }
 
@@ -526,7 +678,7 @@ namespace spades {
             spades::ui::Label label(Parent.Manager);
             label.Text = caption;
             label.Alignment = Vector2(0.f, 0.5f);
-            label.Bounds = AABB2(10.f, 0.f, 300.f, 32.f);
+            label.Bounds = AABB2(10.f, 0.f, FieldX - 20.f, 32.f);
             container.AddChild(label);
 
             ConfigField field(Parent.Manager, configName);
@@ -545,7 +697,7 @@ namespace spades {
             spades::ui::Label label(Parent.Manager);
             label.Text = caption;
             label.Alignment = Vector2(0.f, 0.5f);
-            label.Bounds = AABB2(10.f, 0.f, 300.f, 32.f);
+            label.Bounds = AABB2(10.f, 0.f, FieldX - 20.f, 32.f);
             container.AddChild(label);
 
             ConfigSlider slider(Parent.Manager, configName, minRange, maxRange, step, formatter);
@@ -562,7 +714,7 @@ namespace spades {
             spades::ui::Label label(Parent.Manager);
             label.Text = caption;
             label.Alignment = Vector2(0.f, 0.5f);
-            label.Bounds = AABB2(10.f, 0.f, 300.f, 32.f);
+            label.Bounds = AABB2(10.f, 0.f, FieldX - 20.f, 32.f);
             container.AddChild(label);
 
             ConfigHotKeyField field(Parent.Manager, configName);
@@ -581,7 +733,7 @@ namespace spades {
             spades::ui::Label label(Parent.Manager);
             label.Text = caption;
             label.Alignment = Vector2(0.f, 0.5f);
-            label.Bounds = AABB2(10.f, 0.f, 300.f, 32.f);
+            label.Bounds = AABB2(10.f, 0.f, FieldX - 20.f, 32.f);
             container.AddChild(label);
 
             for (uint i = 0; i < labels.length; ++i) {
@@ -607,16 +759,19 @@ namespace spades {
                            array<int> = {1, -1, 0}, enabled);
         }
 
-        void FinishLayout() {
+        spades::ui::ListView @FinishLayout() {
             spades::ui::ListView list(Parent.Manager);
             @list.Model = StandardPreferenceLayouterModel(items);
             list.RowHeight = 32.f;
-            list.Bounds = AABB2(0.f, 0.f, 580.f, 530.f);
+            list.Bounds = AABB2(0.f, 0.f, Max(580.f, Parent.Size.x), Max(400.f, Parent.Size.y));
             Parent.AddChild(list);
+            return list;
         }
     }
 
     class GameOptionsPanel : spades::ui::UIElement {
+        private spades::ui::ListView @listView;
+
         GameOptionsPanel(spades::ui::UIManager @manager, PreferenceViewOptions @options,
                          FontManager @fontManager) {
             super(manager);
@@ -672,11 +827,21 @@ namespace spades {
             layouter.AddSliderField(_Tr("Preferences", "Minimap size"), "cg_minimapSize", 128, 256,
                                     8, ConfigNumberFormatter(0, " px"));
             layouter.AddToggleField(_Tr("Preferences", "Show Statistics"), "cg_stats");
-            layouter.FinishLayout();
+            @listView = layouter.FinishLayout();
         }
+
+        void OnResized() {
+            if (listView !is null)
+                listView.Bounds = AABB2(0.f, 0.f, Size.x, Size.y);
+            UIElement::OnResized();
+        }
+
+        void ScrollToSection(int row) { listView.ScrollToRow(row); }
     }
 
     class ControlOptionsPanel : spades::ui::UIElement {
+        private spades::ui::ListView @listView;
+
         ControlOptionsPanel(spades::ui::UIManager @manager, PreferenceViewOptions @options,
                             FontManager @fontManager) {
             super(manager);
@@ -727,8 +892,16 @@ namespace spades {
             layouter.AddControl(_Tr("Preferences", "Save Sceneshot"), "cg_keySceneshot");
             layouter.AddControl(_Tr("Preferences", "Save Screenshot"), "cg_keyScreenshot");
 
-            layouter.FinishLayout();
+            @listView = layouter.FinishLayout();
         }
+
+        void OnResized() {
+            if (listView !is null)
+                listView.Bounds = AABB2(0.f, 0.f, Size.x, Size.y);
+            UIElement::OnResized();
+        }
+
+        void ScrollToSection(int row) { listView.ScrollToRow(row); }
     }
 
     class MiscOptionsPanel : spades::ui::UIElement {
@@ -759,6 +932,14 @@ namespace spades {
             }
 
             UpdateState();
+        }
+
+        void OnResized() {
+            if (enableButton !is null) {
+                enableButton.Bounds = AABB2(10.f, 10.f, Min(430.f, Size.x - 20.f), 30.f);
+                msgLabel.Bounds = AABB2(12.f, 52.f, Max(100.f, Size.x - 24.f), 32.f);
+            }
+            UIElement::OnResized();
         }
 
         void UpdateState() {
