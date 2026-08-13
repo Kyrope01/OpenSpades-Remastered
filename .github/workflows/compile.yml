@@ -48,18 +48,17 @@ jobs:
             zip \
             zlib1g-dev
 
-      - name: Checkout release source
-        uses: actions/checkout@v4
+      # Build the exact commit selected in the workflow-dispatch UI. The fixed `release`
+      # tag is replaced only after this commit has built and passed package validation.
+      - name: Checkout selected source
+        uses: actions/checkout@v5
         with:
-          ref: release
+          fetch-depth: 0
           submodules: false
 
       - name: Set release variables
         run: |
-          set -eu
-          RELEASE_TAG="release"
-          
-          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=release" >> "$GITHUB_ENV"
           echo "ARCHIVE_NAME=OpenSpades-release-linux-debian12-x86_64" >> "$GITHUB_ENV"
 
       - name: Configure
@@ -122,11 +121,27 @@ jobs:
             exit 1
           fi
 
-      - name: Upload ZIP to GitHub release
+      - name: Replace release tag and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$RELEASE_TAG" \
+          set -eu
+
+          # A fixed tag can identify only one GitHub Release. Remove the old Release first,
+          # then force the tag to the exact commit that produced the validated package.
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" \
+              --yes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+          git tag --force "$RELEASE_TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$RELEASE_TAG"
+
+          # Create a brand-new Release and upload the new package in the same command.
+          gh release create "$RELEASE_TAG" \
             "$ARCHIVE_NAME.zip" \
-            --clobber \
+            --verify-tag \
+            --title "OpenSpades Remastered" \
+            --notes "Automated Debian build from commit $GITHUB_SHA." \
             --repo "$GITHUB_REPOSITORY"
