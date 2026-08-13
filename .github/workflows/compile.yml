@@ -48,8 +48,8 @@ jobs:
             zip \
             zlib1g-dev
 
-      # Build the exact commit selected in the workflow-dispatch UI. The fixed `release`
-      # tag is replaced only after this commit has built and passed package validation.
+      # Build the exact commit selected in the workflow-dispatch UI.
+      # The release tag is replaced only after the build passes validation.
       - name: Checkout selected source
         uses: actions/checkout@v5
         with:
@@ -69,42 +69,52 @@ jobs:
             -DOPENSPADES_YSR=OFF
 
       - name: Build
-        run: cmake --build build --parallel "$(nproc)"
+        run: |
+          cmake --build build --parallel "$(nproc)"
 
       - name: Create portable ZIP
         run: |
           set -eu
+
           PACKAGE_DIR="package/$ARCHIVE_NAME"
           mkdir -p "$PACKAGE_DIR/Resources"
 
           install -m 0755 build/bin/openspades "$PACKAGE_DIR/openspades"
           install -m 0644 build/Resources/*.pak "$PACKAGE_DIR/Resources/"
           install -m 0644 build/Resources/PackageInfo.json "$PACKAGE_DIR/Resources/"
-          find build/Resources -maxdepth 1 -type f -name 'LICENSE.*' \
+
+          find build/Resources \
+            -maxdepth 1 \
+            -type f \
+            -name 'LICENSE.*' \
             -exec cp '{}' "$PACKAGE_DIR/Resources/" ';'
+
           install -m 0644 AUTHORS LICENSE README.md "$PACKAGE_DIR/"
 
           cat > "$PACKAGE_DIR/OpenSpades.sh" <<'SCRIPT'
           #!/usr/bin/env sh
           set -eu
+
           SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
           cd "$SCRIPT_DIR"
+
           exec ./openspades "$@"
           SCRIPT
+
           chmod 0755 "$PACKAGE_DIR/OpenSpades.sh"
 
           cat > "$PACKAGE_DIR/README-DEBIAN.txt" <<'INSTRUCTIONS'
           OpenSpades for Debian 12 (x86_64)
           ==================================
 
-          Install the runtime libraries:
+          Install the required runtime libraries:
 
             sudo apt-get update
             sudo apt-get install libcurl4 libfreetype6 libgl1 libglew2.2 \
               libopenal1 libopusfile0 libsdl2-2.0-0 libsdl2-image-2.0-0 \
               libxext6 zlib1g
 
-          Start the game from this directory with:
+          Start OpenSpades from this directory with:
 
             ./OpenSpades.sh
 
@@ -112,12 +122,17 @@ jobs:
           OpenSpades can locate the bundled Resources directory.
           INSTRUCTIONS
 
-          (cd package && zip -9 -r "../$ARCHIVE_NAME.zip" "$ARCHIVE_NAME")
+          (
+            cd package
+            zip -9 -r "../$ARCHIVE_NAME.zip" "$ARCHIVE_NAME"
+          )
 
           unzip -t "$ARCHIVE_NAME.zip"
+
           ldd "$PACKAGE_DIR/openspades" | tee linked-libraries.txt
+
           if grep -q 'not found' linked-libraries.txt; then
-            echo 'One or more runtime libraries are missing from the build image.' >&2
+            echo "One or more runtime libraries are missing from the build image." >&2
             exit 1
           fi
 
@@ -127,18 +142,25 @@ jobs:
         run: |
           set -eu
 
-          # A fixed tag can identify only one GitHub Release. Remove the old Release first,
-          # then force the tag to the exact commit that produced the validated package.
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # actions/checkout writes the repository as the runner user, while
+          # this Debian container runs as root. Trust only this checkout.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          # Delete the previous GitHub Release while retaining the fixed tag
+          # until the new package has successfully finished building.
+          if gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          then
             gh release delete "$RELEASE_TAG" \
               --yes \
               --repo "$GITHUB_REPOSITORY"
           fi
 
+          # Move the fixed release tag to the exact commit built by this run.
           git tag --force "$RELEASE_TAG" "$GITHUB_SHA"
           git push --force origin "refs/tags/$RELEASE_TAG"
 
-          # Create a brand-new Release and upload the new package in the same command.
+          # Create a completely new GitHub Release and upload the ZIP.
           gh release create "$RELEASE_TAG" \
             "$ARCHIVE_NAME.zip" \
             --verify-tag \
