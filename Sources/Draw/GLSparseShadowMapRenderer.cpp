@@ -493,10 +493,12 @@ namespace spades {
 
 					inst.model = rmodel.model;
 					OBB3 modelBounds = inst.model->GetBoundingBox();
-					for (size_t i = 0; i < rmodel.params.size(); i++) {
-						inst.param = &(rmodel.params[i]);
+					for (size_t i = 0; i < rmodel.shadowParams.size(); i++) {
+						inst.param = &(rmodel.shadowParams[i]);
 
-						if (inst.param->depthHack)
+						// Match the eligibility rules used by GLModelRenderer. Instances
+						// which cannot cast a model shadow must not consume sparse pages.
+						if (inst.param->depthHack || inst.param->ghost || !inst.param->castShadow)
 							continue;
 
 						OBB3 instWorldBoundsOBB = inst.param->matrix * modelBounds;
@@ -680,14 +682,12 @@ namespace spades {
 
 			ModelRenderer() {
 				params.reserve(64);
-				// The legacy batch starts with identity transforms. One produces the same
-				// depth result as 64 identical copies without repeating the draw 64 times.
-				params.resize(1);
 				lastModel = NULL;
 			}
 
 			void Flush() {
 				if (lastModel) {
+					SPAssert(!params.empty());
 					lastModel->RenderShadowMapPass(params);
 					params.clear();
 					lastModel = NULL;

@@ -86,8 +86,15 @@ namespace spades {
 				  Vector3::Cross(planeTan[2], param.spotAxis[1]),
 				  Vector3::Cross(param.spotAxis[0], planeTan[3]),
 				};
-				// Finally, find planes with these normal vectors:
+				// Finally, find planes with unit normal vectors. SphereCull compares
+				// plane distances with a world-space radius, so normalized planes are
+				// required for the comparison to remain conservative.
 				for (std::size_t i = 0; i < 4; ++i) {
+					float length = planeN[i].GetLength();
+					if (length > 1.e-6f)
+						planeN[i] *= 1.f / length;
+					else
+						planeN[i] = MakeVector3(0.f, 0.f, 0.f);
 					clipPlanes[i] = Plane3::PlaneWithPointOnPlane(param.origin, planeN[i]);
 				}
 			}

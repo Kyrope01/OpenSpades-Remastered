@@ -40,10 +40,12 @@ namespace spades {
 
 			struct RenderModel {
 				GLModel *model = nullptr;
-				std::vector<client::ModelRenderParam> params;
-				bool hasGhost = false;
-				bool hasNonGhost = false;
-				bool hasShadowCaster = false;
+				// Instances are classified once at submission. Draw passes consume only
+				// the lists relevant to their view and pass.
+				std::vector<client::ModelRenderParam> mainParams;
+				std::vector<client::ModelRenderParam> mirrorParams;
+				std::vector<client::ModelRenderParam> ghostParams;
+				std::vector<client::ModelRenderParam> shadowParams;
 			};
 
 			std::vector<RenderModel> models;

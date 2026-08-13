@@ -295,49 +295,37 @@ namespace spades {
 			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 		}
 
-		void GLMapChunk::RenderDepthPass() {
-			SPADES_MARK_FUNCTION_DEBUG();
-			Vector3 eye = renderer->renderer->GetSceneDef().viewOrigin;
-
+		bool GLMapChunk::PrepareForRendering(float offsetX, float offsetY, bool mirror,
+		                                     AABB3 &bounds) {
 			if (!realized)
-				return;
+				return false;
+
+			bounds = aabb;
+			bounds.min.x += offsetX;
+			bounds.min.y += offsetY;
+			bounds.max.x += offsetX;
+			bounds.max.y += offsetY;
+			if (!renderer->renderer->BoxFrustrumCull(bounds, mirror))
+				return false;
+
+			// Delay rebuilding a dirty chunk until it is visible in at least one view.
 			if (needsUpdate) {
 				Update();
 				needsUpdate = false;
 			}
-			if (!buffer) {
-				// empty chunk
-				return;
-			}
-			AABB3 bx = aabb;
+			return buffer != 0;
+		}
 
-			Vector3 diff = eye - centerPos;
-			float sx = 0.f, sy = 0.f;
-			// FIXME: variable map size?
-			if (diff.x > 256.f)
-				sx += 512.f;
-			if (diff.y > 256.f)
-				sy += 512.f;
-			if (diff.x < -256.f)
-				sx -= 512.f;
-			if (diff.y < -256.f)
-				sy -= 512.f;
-
-			bx.min.x += sx;
-			bx.min.y += sy;
-			bx.max.x += sx;
-			bx.max.y += sy;
-
-			if (!renderer->renderer->BoxFrustrumCull(bx))
-				return;
+		void GLMapChunk::RenderDepthPass(float offsetX, float offsetY) {
+			SPADES_MARK_FUNCTION_DEBUG();
 
 			GLProgram *depthonlyProgram = renderer->depthonlyProgram;
 
 			static GLProgramUniform chunkPosition("chunkPosition");
 
 			chunkPosition(depthonlyProgram);
-			chunkPosition.SetValue((float)(chunkX * Size) + sx, (float)(chunkY * Size) + sy,
-			                       (float)(chunkZ * Size));
+			chunkPosition.SetValue((float)(chunkX * Size) + offsetX,
+			                       (float)(chunkY * Size) + offsetY, (float)(chunkZ * Size));
 
 			static GLProgramAttribute positionAttribute("positionAttribute");
 
@@ -352,49 +340,17 @@ namespace spades {
 			                     static_cast<IGLDevice::Sizei>(indices.size()),
 			                     IGLDevice::UnsignedShort, NULL);
 		}
-		void GLMapChunk::RenderSunlightPass() {
+
+		void GLMapChunk::RenderSunlightPass(float offsetX, float offsetY) {
 			SPADES_MARK_FUNCTION_DEBUG();
-			Vector3 eye = renderer->renderer->GetSceneDef().viewOrigin;
-
-			if (!realized)
-				return;
-			if (needsUpdate) {
-				Update();
-				needsUpdate = false;
-			}
-			if (!buffer) {
-				// empty chunk
-				return;
-			}
-			AABB3 bx = aabb;
-
-			Vector3 diff = eye - centerPos;
-			float sx = 0.f, sy = 0.f;
-			// FIXME: variable map size?
-			if (diff.x > 256.f)
-				sx += 512.f;
-			if (diff.y > 256.f)
-				sy += 512.f;
-			if (diff.x < -256.f)
-				sx -= 512.f;
-			if (diff.y < -256.f)
-				sy -= 512.f;
-
-			bx.min.x += sx;
-			bx.min.y += sy;
-			bx.max.x += sx;
-			bx.max.y += sy;
-
-			if (!renderer->renderer->BoxFrustrumCull(bx))
-				return;
 
 			GLProgram *basicProgram = renderer->basicProgram;
 
 			static GLProgramUniform chunkPosition("chunkPosition");
 
 			chunkPosition(basicProgram);
-			chunkPosition.SetValue((float)(chunkX * Size) + sx, (float)(chunkY * Size) + sy,
-			                       (float)(chunkZ * Size));
+			chunkPosition.SetValue((float)(chunkX * Size) + offsetX,
+			                       (float)(chunkY * Size) + offsetY, (float)(chunkZ * Size));
 
 			static GLProgramAttribute positionAttribute("positionAttribute");
 			static GLProgramAttribute ambientOcclusionCoordAttribute(
@@ -431,45 +387,13 @@ namespace spades {
 			                     IGLDevice::UnsignedShort, NULL);
 		}
 
-		void GLMapChunk::RenderDLightPass(const std::vector<GLDynamicLight> &lights) {
+		void GLMapChunk::RenderDLightPass(const std::vector<GLDynamicLight> &lights, float offsetX,
+		                                  float offsetY, const AABB3 &bounds) {
 			SPADES_MARK_FUNCTION_DEBUG();
-			Vector3 eye = renderer->renderer->GetSceneDef().viewOrigin;
-
-			if (!realized)
-				return;
-			if (needsUpdate) {
-				Update();
-				needsUpdate = false;
-			}
-			if (!buffer) {
-				// empty chunk
-				return;
-			}
-			AABB3 bx = aabb;
-
-			Vector3 diff = eye - centerPos;
-			float sx = 0.f, sy = 0.f;
-			// FIXME: variable map size?
-			if (diff.x > 256.f)
-				sx += 512.f;
-			if (diff.y > 256.f)
-				sy += 512.f;
-			if (diff.x < -256.f)
-				sx -= 512.f;
-			if (diff.y < -256.f)
-				sy -= 512.f;
-
-			bx.min.x += sx;
-			bx.min.y += sy;
-			bx.max.x += sx;
-			bx.max.y += sy;
-
-			if (!renderer->renderer->BoxFrustrumCull(bx))
-				return;
 
 			bool affected = false;
 			for (const GLDynamicLight &light : lights) {
-				if (light.Cull(bx)) {
+				if (light.Cull(bounds)) {
 					affected = true;
 					break;
 				}
@@ -482,8 +406,8 @@ namespace spades {
 			static GLProgramUniform chunkPosition("chunkPosition");
 
 			chunkPosition(program);
-			chunkPosition.SetValue((float)(chunkX * Size) + sx, (float)(chunkY * Size) + sy,
-			                       (float)(chunkZ * Size));
+			chunkPosition.SetValue((float)(chunkX * Size) + offsetX,
+			                       (float)(chunkY * Size) + offsetY, (float)(chunkZ * Size));
 
 			static GLProgramAttribute positionAttribute("positionAttribute");
 			static GLProgramAttribute colorAttribute("colorAttribute");
@@ -503,7 +427,7 @@ namespace spades {
 
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, iBuffer);
 			for (const GLDynamicLight &light : lights) {
-				if (!light.Cull(bx))
+				if (!light.Cull(bounds))
 					continue;
 
 				static GLDynamicLightShader lightShader;
@@ -513,7 +437,6 @@ namespace spades {
 				                     static_cast<IGLDevice::Sizei>(indices.size()),
 				                     IGLDevice::UnsignedShort, NULL);
 			}
-
 		}
 
 		float GLMapChunk::DistanceFromEye(const Vector3 &eye) {

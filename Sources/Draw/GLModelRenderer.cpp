@@ -47,10 +47,22 @@ namespace spades {
 			}
 			modelCount++;
 			RenderModel &renderModel = models[model->renderId];
-			renderModel.params.push_back(param);
-			renderModel.hasGhost |= param.ghost;
-			renderModel.hasNonGhost |= !param.ghost;
-			renderModel.hasShadowCaster |= param.castShadow && !param.ghost && !param.depthHack;
+
+			const float radius =
+			  GLModel::GetTransformedBoundingRadius(param.matrix, model->GetBoundingRadius());
+			const Vector3 origin = param.matrix.GetOrigin();
+			if (param.ghost) {
+				if (renderer->SphereFrustrumCull(origin, radius, false))
+					renderModel.ghostParams.push_back(param);
+			} else {
+				if (renderer->SphereFrustrumCull(origin, radius, false))
+					renderModel.mainParams.push_back(param);
+				if ((int)renderer->GetSettings().r_water >= 2 && !param.depthHack &&
+				    renderer->SphereFrustrumCull(origin, radius, true))
+					renderModel.mirrorParams.push_back(param);
+			}
+			if (param.castShadow && !param.ghost && !param.depthHack)
+				renderModel.shadowParams.push_back(param);
 		}
 
 		void GLModelRenderer::RenderShadowMapPass() {
@@ -62,11 +74,11 @@ namespace spades {
 			int numModels = 0;
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
-				if (!m.hasShadowCaster)
+				if (m.shadowParams.empty())
 					continue;
 				GLModel *model = m.model;
-				model->RenderShadowMapPass(m.params);
-				numModels += (int)m.params.size();
+				model->RenderShadowMapPass(m.shadowParams);
+				numModels += (int)m.shadowParams.size();
 			}
 #if 0
 			printf("Model types: %d, Number of models: %d\n",
@@ -83,11 +95,14 @@ namespace spades {
 			int numModels = 0;
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
-				if (ghostPass ? !m.hasGhost : !m.hasNonGhost)
+				const std::vector<client::ModelRenderParam> &params =
+				  ghostPass ? m.ghostParams
+				            : (renderer->IsRenderingMirror() ? m.mirrorParams : m.mainParams);
+				if (params.empty())
 					continue;
 				GLModel *model = m.model;
-				model->Prerender(m.params, ghostPass);
-				numModels += (int)m.params.size();
+				model->Prerender(params, ghostPass);
+				numModels += (int)params.size();
 			}
 			device->ColorMask(true, true, true, true);
 		}
@@ -100,11 +115,14 @@ namespace spades {
 
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
-				if (ghostPass ? !m.hasGhost : !m.hasNonGhost)
+				const std::vector<client::ModelRenderParam> &params =
+				  ghostPass ? m.ghostParams
+				            : (renderer->IsRenderingMirror() ? m.mirrorParams : m.mainParams);
+				if (params.empty())
 					continue;
 				GLModel *model = m.model;
 
-				model->RenderSunlightPass(m.params, ghostPass);
+				model->RenderSunlightPass(params, ghostPass);
 			}
 		}
 
@@ -118,11 +136,13 @@ namespace spades {
 
 				for (size_t i = 0; i < models.size(); i++) {
 					RenderModel &m = models[i];
-					if (!m.hasNonGhost)
+					const std::vector<client::ModelRenderParam> &params =
+					  renderer->IsRenderingMirror() ? m.mirrorParams : m.mainParams;
+					if (params.empty())
 						continue;
 					GLModel *model = m.model;
 
-					model->RenderDynamicLightPass(m.params, lights);
+					model->RenderDynamicLightPass(params, lights);
 				}
 
 				// Keep the pass postcondition even when every backend rejected all lights.

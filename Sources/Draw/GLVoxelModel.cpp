@@ -308,8 +308,7 @@ namespace spades {
 				}
 
 				// frustrum cull
-				float rad = radius;
-				rad *= param.matrix.GetAxis(0).GetLength();
+				float rad = GetTransformedBoundingRadius(param.matrix, radius);
 
 				if (param.depthHack)
 					continue;
@@ -426,13 +425,6 @@ namespace spades {
 					continue;
 				}
 
-				// frustrum cull
-				float rad = radius;
-				rad *= param.matrix.GetAxis(0).GetLength();
-				if (!renderer->SphereFrustrumCull(param.matrix.GetOrigin(), rad)) {
-					continue;
-				}
-
 				static GLProgramUniform customColor("customColor");
 				customColor(program);
 				customColor.SetValue(param.customColor.x, param.customColor.y, param.customColor.z);
@@ -493,9 +485,7 @@ namespace spades {
 				if (param.ghost)
 					continue;
 
-				float rad = radius * param.matrix.GetAxis(0).GetLength();
-				if (!renderer->SphereFrustrumCull(param.matrix.GetOrigin(), rad))
-					continue;
+				float rad = GetTransformedBoundingRadius(param.matrix, radius);
 
 				for (const GLDynamicLight &light : lights) {
 					if (light.SphereCull(param.matrix.GetOrigin(), rad)) {
@@ -567,12 +557,7 @@ namespace spades {
 				if (param.ghost)
 					continue;
 
-				// frustrum cull
-				float rad = radius;
-				rad *= param.matrix.GetAxis(0).GetLength();
-				if (!renderer->SphereFrustrumCull(param.matrix.GetOrigin(), rad)) {
-					continue;
-				}
+				float rad = GetTransformedBoundingRadius(param.matrix, radius);
 
 				bool affected = false;
 				for (const GLDynamicLight &light : lights) {

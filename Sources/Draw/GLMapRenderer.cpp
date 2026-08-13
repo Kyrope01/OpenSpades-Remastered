@@ -60,7 +60,10 @@ namespace spades {
 			numChunks = numChunkWidth * numChunkHeight * numChunkDepth;
 
 			chunks = new GLMapChunk *[numChunks];
-			chunkInfos = new ChunkRenderInfo[numChunks];
+			activeColumnPositions.assign(numChunkWidth * numChunkHeight, -1);
+			activeColumns.reserve(numChunkWidth * numChunkHeight);
+			visibleChunks[0].reserve(numChunks);
+			visibleChunks[1].reserve(numChunks);
 
 			for (int i = 0; i < numChunks; i++)
 				chunks[i] = new GLMapChunk(this, gameMap, i / numChunkDepth / numChunkHeight,
@@ -90,7 +93,6 @@ namespace spades {
 			for (int i = 0; i < numChunks; i++)
 				delete chunks[i];
 			delete[] chunks;
-			delete[] chunkInfos;
 		}
 		void GLMapRenderer::GameMapChanged(int x, int y, int z, client::GameMap *map) {
 			SPADES_MARK_FUNCTION_DEBUG();
@@ -123,19 +125,129 @@ namespace spades {
 					}
 		}
 
+		void GLMapRenderer::SetColumnRealized(int columnIndex, bool realized) {
+			const int x = columnIndex / numChunkHeight;
+			const int y = columnIndex % numChunkHeight;
+			for (int z = 0; z < numChunkDepth; z++)
+				GetChunk(x, y, z)->SetRealized(realized);
+		}
+
 		void GLMapRenderer::RealizeChunks(spades::Vector3 eye) {
 			SPADES_MARK_FUNCTION();
 
-			float cullDistance = 128.f;
-			float releaseDistance = 160.f;
-			for (int i = 0; i < numChunks; i++) {
-				float dist = chunks[i]->DistanceFromEye(eye);
-				chunkInfos[i].distance = dist;
-				if (dist < cullDistance)
-					chunks[i]->SetRealized(true);
-				else if (dist > releaseDistance)
-					chunks[i]->SetRealized(false);
+			const float cullDistance = 128.f;
+			const float releaseDistance = 160.f;
+
+			// Release by scanning only columns that currently own buffers. DistanceFromEye
+			// intentionally ignores z, so all chunks in a column share realization state.
+			for (size_t i = 0; i < activeColumns.size();) {
+				const int columnIndex = activeColumns[i];
+				const int x = columnIndex / numChunkHeight;
+				const int y = columnIndex % numChunkHeight;
+				if (GetChunk(x, y, 0)->DistanceFromEye(eye) > releaseDistance) {
+					SetColumnRealized(columnIndex, false);
+					activeColumnPositions[columnIndex] = -1;
+					const int movedColumn = activeColumns.back();
+					activeColumns[i] = movedColumn;
+					activeColumns.pop_back();
+					if (i < activeColumns.size())
+						activeColumnPositions[movedColumn] = static_cast<int>(i);
+				} else {
+					++i;
+				}
 			}
+
+			// Conservatively enumerate every column that can satisfy the exact activation
+			// test. The extra chunk half-width matches DistanceFromEye's distance metric.
+			const int cx = static_cast<int>(floorf(eye.x / GLMapChunk::Size));
+			const int cy = static_cast<int>(floorf(eye.y / GLMapChunk::Size));
+			const int activationRadius =
+			  static_cast<int>(ceilf((cullDistance + GLMapChunk::Size * .5f) / GLMapChunk::Size));
+			for (int x = cx - activationRadius; x <= cx + activationRadius; x++) {
+				for (int y = cy - activationRadius; y <= cy + activationRadius; y++) {
+					const int wrappedX = x & (numChunkWidth - 1);
+					const int wrappedY = y & (numChunkHeight - 1);
+					const int columnIndex = wrappedX * numChunkHeight + wrappedY;
+					if (activeColumnPositions[columnIndex] != -1)
+						continue;
+					if (GetChunk(wrappedX, wrappedY, 0)->DistanceFromEye(eye) >= cullDistance)
+						continue;
+
+					SetColumnRealized(columnIndex, true);
+					activeColumnPositions[columnIndex] = static_cast<int>(activeColumns.size());
+					activeColumns.push_back(columnIndex);
+				}
+			}
+		}
+
+		void GLMapRenderer::AppendVisibleColumn(int cx, int cy, int cz, Vector3 eye, bool mirror,
+		                                        std::vector<VisibleChunk> &output) {
+			cx &= numChunkWidth - 1;
+			cy &= numChunkHeight - 1;
+
+			float offsetX = 0.f;
+			float offsetY = 0.f;
+			const float centerX = static_cast<float>(cx * GLMapChunk::Size + GLMapChunk::Size / 2);
+			const float centerY = static_cast<float>(cy * GLMapChunk::Size + GLMapChunk::Size / 2);
+			if (eye.x - centerX > gameMap->Width() * .5f)
+				offsetX += static_cast<float>(gameMap->Width());
+			if (eye.y - centerY > gameMap->Height() * .5f)
+				offsetY += static_cast<float>(gameMap->Height());
+			if (eye.x - centerX < gameMap->Width() * -.5f)
+				offsetX -= static_cast<float>(gameMap->Width());
+			if (eye.y - centerY < gameMap->Height() * -.5f)
+				offsetY -= static_cast<float>(gameMap->Height());
+
+			const int firstUpperChunk = std::max(cz, 0);
+			for (int z = firstUpperChunk; z < numChunkDepth; z++) {
+				VisibleChunk entry;
+				entry.chunk = GetChunk(cx, cy, z);
+				entry.offsetX = offsetX;
+				entry.offsetY = offsetY;
+				if (entry.chunk->PrepareForRendering(offsetX, offsetY, mirror, entry.bounds))
+					output.push_back(entry);
+			}
+			const int firstLowerChunk = std::min(cz - 1, numChunkDepth - 1);
+			for (int z = firstLowerChunk; z >= 0; z--) {
+				VisibleChunk entry;
+				entry.chunk = GetChunk(cx, cy, z);
+				entry.offsetX = offsetX;
+				entry.offsetY = offsetY;
+				if (entry.chunk->PrepareForRendering(offsetX, offsetY, mirror, entry.bounds))
+					output.push_back(entry);
+			}
+		}
+
+		void GLMapRenderer::BuildVisibleChunkLists(Vector3 eye) {
+			SPADES_MARK_FUNCTION();
+
+			visibleChunks[0].clear();
+			visibleChunks[1].clear();
+			const int cx = static_cast<int>(floorf(eye.x)) / GLMapChunk::Size;
+			const int cy = static_cast<int>(floorf(eye.y)) / GLMapChunk::Size;
+			const int cz = static_cast<int>(floorf(eye.z)) / GLMapChunk::Size;
+
+			for (int view = 0; view < 2; view++) {
+				if (view == 1 && (int)renderer->GetSettings().r_water < 2)
+					break;
+				std::vector<VisibleChunk> &output = visibleChunks[view];
+				const bool mirror = view == 1;
+				AppendVisibleColumn(cx, cy, cz, eye, mirror, output);
+				for (int dist = 1; dist <= 128 / GLMapChunk::Size; dist++) {
+					for (int x = cx - dist; x <= cx + dist; x++) {
+						AppendVisibleColumn(x, cy + dist, cz, eye, mirror, output);
+						AppendVisibleColumn(x, cy - dist, cz, eye, mirror, output);
+					}
+					for (int y = cy - dist + 1; y <= cy + dist - 1; y++) {
+						AppendVisibleColumn(cx + dist, y, cz, eye, mirror, output);
+						AppendVisibleColumn(cx - dist, y, cz, eye, mirror, output);
+					}
+				}
+			}
+		}
+
+		const std::vector<GLMapRenderer::VisibleChunk> &GLMapRenderer::GetVisibleChunks() const {
+			return visibleChunks[renderer->IsRenderingMirror() ? 1 : 0];
 		}
 
 		void GLMapRenderer::Realize() {
@@ -143,6 +255,12 @@ namespace spades {
 
 			Vector3 eye = renderer->GetSceneDef().viewOrigin;
 			RealizeChunks(eye);
+			if (renderer->GetSceneDef().skipWorld) {
+				visibleChunks[0].clear();
+				visibleChunks[1].clear();
+				return;
+			}
+			BuildVisibleChunkLists(eye);
 		}
 
 		void GLMapRenderer::Prerender() {
@@ -150,7 +268,6 @@ namespace spades {
 			//depth-only pass
 
 			GLProfiler::Context profiler(renderer->GetGLProfiler(), "Map");
-			Vector3 eye = renderer->GetSceneDef().viewOrigin;
 
 			device->Enable(IGLDevice::CullFace, true);
 			device->Enable(IGLDevice::DepthTest, true);
@@ -164,22 +281,9 @@ namespace spades {
 			projectionViewMatrix(depthonlyProgram);
 			projectionViewMatrix.SetValue(renderer->GetProjectionViewMatrix());
 
-			// draw from nearest to farthest
-			int cx = (int)floorf(eye.x) / GLMapChunk::Size;
-			int cy = (int)floorf(eye.y) / GLMapChunk::Size;
-			int cz = (int)floorf(eye.z) / GLMapChunk::Size;
-			DrawColumnDepth(cx, cy, cz, eye);
-			for (int dist = 1; dist <= 128 / GLMapChunk::Size; dist++) {
-				for (int x = cx - dist; x <= cx + dist; x++) {
-					DrawColumnDepth(x, cy + dist, cz, eye);
-					DrawColumnDepth(x, cy - dist, cz, eye);
-				}
-				for (int y = cy - dist + 1; y <= cy + dist - 1; y++) {
-					DrawColumnDepth(cx + dist, y, cz, eye);
-					DrawColumnDepth(cx - dist, y, cz, eye);
-				}
-			}
-
+			// The exact ordered visibility list is shared by every terrain pass in this view.
+			for (const VisibleChunk &entry : GetVisibleChunks())
+				entry.chunk->RenderDepthPass(entry.offsetX, entry.offsetY);
 
 			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
@@ -192,8 +296,6 @@ namespace spades {
 			SPADES_MARK_FUNCTION();
 
 			GLProfiler::Context profiler(renderer->GetGLProfiler(), "Map");
-
-			Vector3 eye = renderer->GetSceneDef().viewOrigin;
 
 			// draw back face to avoid cheating.
 			// without this, players can see through blocks by
@@ -275,24 +377,8 @@ namespace spades {
 			const auto &viewOrigin = renderer->GetSceneDef().viewOrigin;
 			viewOriginVector.SetValue(viewOrigin.x, viewOrigin.y, viewOrigin.z);
 
-			//RealizeChunks(eye); // should already be realized from the prepass
-			//TODO maybe add some way of checking if the chunks have been realized for the current eye? Probably just a bool called "alreadyrealized" that gets checked in RealizeChunks
-
-			// draw from nearest to farthest
-			int cx = (int)floorf(eye.x) / GLMapChunk::Size;
-			int cy = (int)floorf(eye.y) / GLMapChunk::Size;
-			int cz = (int)floorf(eye.z) / GLMapChunk::Size;
-			DrawColumnSunlight(cx, cy, cz, eye);
-			for (int dist = 1; dist <= 128 / GLMapChunk::Size; dist++) {
-				for (int x = cx - dist; x <= cx + dist; x++) {
-					DrawColumnSunlight(x, cy + dist, cz, eye);
-					DrawColumnSunlight(x, cy - dist, cz, eye);
-				}
-				for (int y = cy - dist + 1; y <= cy + dist - 1; y++) {
-					DrawColumnSunlight(cx + dist, y, cz, eye);
-					DrawColumnSunlight(cx - dist, y, cz, eye);
-				}
-			}
+			for (const VisibleChunk &entry : GetVisibleChunks())
+				entry.chunk->RenderSunlightPass(entry.offsetX, entry.offsetY);
 
 			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
@@ -317,8 +403,6 @@ namespace spades {
 
 			if (lights.empty())
 				return;
-
-			Vector3 eye = renderer->GetSceneDef().viewOrigin;
 
 			device->ActiveTexture(0);
 			device->BindTexture(IGLDevice::Texture2D, 0);
@@ -363,24 +447,8 @@ namespace spades {
 			const auto &viewOrigin = renderer->GetSceneDef().viewOrigin;
 			viewOriginVector.SetValue(viewOrigin.x, viewOrigin.y, viewOrigin.z);
 
-			//RealizeChunks(eye); // should already be realized from the prepass
-
-			// draw from nearest to farthest
-			int cx = (int)floorf(eye.x) / GLMapChunk::Size;
-			int cy = (int)floorf(eye.y) / GLMapChunk::Size;
-			int cz = (int)floorf(eye.z) / GLMapChunk::Size;
-			DrawColumnDLight(cx, cy, cz, eye, lights);
-			// Each chunk rejects the pass before GL setup when no dynamic light reaches it.
-			for (int dist = 1; dist <= 128 / GLMapChunk::Size; dist++) {
-				for (int x = cx - dist; x <= cx + dist; x++) {
-					DrawColumnDLight(x, cy + dist, cz, eye, lights);
-					DrawColumnDLight(x, cy - dist, cz, eye, lights);
-				}
-				for (int y = cy - dist + 1; y <= cy + dist - 1; y++) {
-					DrawColumnDLight(cx + dist, y, cz, eye, lights);
-					DrawColumnDLight(cx - dist, y, cz, eye, lights);
-				}
-			}
+			for (const VisibleChunk &entry : GetVisibleChunks())
+				entry.chunk->RenderDLightPass(lights, entry.offsetX, entry.offsetY, entry.bounds);
 
 			device->BindBuffer(IGLDevice::ArrayBuffer, 0);
 			device->BindBuffer(IGLDevice::ElementArrayBuffer, 0);
@@ -390,33 +458,6 @@ namespace spades {
 
 			device->ActiveTexture(0);
 			device->BindTexture(IGLDevice::Texture2D, 0);
-		}
-
-		void GLMapRenderer::DrawColumnDepth(int cx, int cy, int cz, spades::Vector3 eye) {
-			cx &= numChunkWidth - 1;
-			cy &= numChunkHeight - 1;
-			for (int z = std::max(cz, 0); z < numChunkDepth; z++)
-				GetChunk(cx, cy, z)->RenderDepthPass();
-			for (int z = std::min(cz - 1, 63); z >= 0; z--)
-				GetChunk(cx, cy, z)->RenderDepthPass();
-		}
-		void GLMapRenderer::DrawColumnSunlight(int cx, int cy, int cz, spades::Vector3 eye) {
-			cx &= numChunkWidth - 1;
-			cy &= numChunkHeight - 1;
-			for (int z = std::max(cz, 0); z < numChunkDepth; z++)
-				GetChunk(cx, cy, z)->RenderSunlightPass();
-			for (int z = std::min(cz - 1, 63); z >= 0; z--)
-				GetChunk(cx, cy, z)->RenderSunlightPass();
-		}
-
-		void GLMapRenderer::DrawColumnDLight(int cx, int cy, int cz, spades::Vector3 eye,
-		                                     const std::vector<GLDynamicLight> &lights) {
-			cx &= numChunkWidth - 1;
-			cy &= numChunkHeight - 1;
-			for (int z = std::max(cz, 0); z < numChunkDepth; z++)
-				GetChunk(cx, cy, z)->RenderDLightPass(lights);
-			for (int z = std::min(cz - 1, 63); z >= 0; z--)
-				GetChunk(cx, cy, z)->RenderDLightPass(lights);
 		}
 
 #pragma mark - BackFaceBlock

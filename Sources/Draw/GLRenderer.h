@@ -125,6 +125,7 @@ namespace spades {
 			Matrix4 projectionMatrix;
 			Matrix4 viewMatrix;
 			Matrix4 projectionViewMatrix;
+			Vector2 projectionJitter;
 			bool renderingMirror;
 
 			Vector4 drawColorAlphaPremultiplied;
@@ -239,7 +240,10 @@ namespace spades {
 			const client::SceneDefinition &GetSceneDef() const { return sceneDef; }
 
 			bool BoxFrustrumCull(const AABB3 &);
+			bool BoxFrustrumCull(const AABB3 &, bool mirror);
 			bool SphereFrustrumCull(const Vector3 &center, float radius);
+			bool SphereFrustrumCull(const Vector3 &center, float radius, bool mirror);
+			bool CapsuleFrustrumCull(const Vector3 &point1, const Vector3 &point2, float radius);
 		};
 	}
 }

@@ -96,6 +96,7 @@ namespace spades {
 			void RenderDynamicLightPass(const std::vector<client::ModelRenderParam> &params,
 			                            const std::vector<GLDynamicLight> &lights) override;
 
+			float GetBoundingRadius() const override { return radius; }
 			AABB3 GetBoundingBox() override { return boundingBox; }
 		};
 	}
