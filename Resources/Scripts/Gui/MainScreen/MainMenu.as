@@ -24,17 +24,19 @@
 
 namespace spades {
 
-    uint8 MainScreenToLower(uint8 c) {
+    // These helpers are shared by the startup configuration filter and console completion.
+    // Keep their original global names so those separately included GUI scripts can resolve them.
+    uint8 ToLower(uint8 c) {
         if (c >= uint8(0x41) and c <= uint8(0x5a))
             return uint8(c - 0x41 + 0x61);
         return c;
     }
 
-    bool MainScreenStringContainsCaseInsensitive(string text, string pattern) {
+    bool StringContainsCaseInsensitive(string text, string pattern) {
         for (int i = int(text.length) - 1; i >= 0; i--)
-            text[i] = MainScreenToLower(text[i]);
+            text[i] = ToLower(text[i]);
         for (int i = int(pattern.length) - 1; i >= 0; i--)
-            pattern[i] = MainScreenToLower(pattern[i]);
+            pattern[i] = ToLower(pattern[i]);
         return text.findFirst(pattern) >= 0;
     }
 
@@ -592,8 +594,9 @@ namespace spades {
         }
 
         void ServerListItemRightClicked(ServerListModel @sender, MainScreenServerItem @item) {
-            item.Favorite = !item.Favorite;
-            ui.helper.SetServerFavorite(item.Address, item.Favorite);
+            // Favorite is exposed by the native server item as read-only. Persist the inverse
+            // through MainScreenHelper; the next model refresh obtains the updated value.
+            ui.helper.SetServerFavorite(item.Address, !item.Favorite);
             UpdateServerList();
         }
 
@@ -654,9 +657,9 @@ namespace spades {
                     (item.NumPlayers == 0 || item.NumPlayers >= item.MaxPlayers))
                     good = false;
                 if (filter.length > 0 &&
-                    !(MainScreenStringContainsCaseInsensitive(item.Name, filter) ||
-                      MainScreenStringContainsCaseInsensitive(item.MapName, filter) ||
-                      MainScreenStringContainsCaseInsensitive(item.GameMode, filter)))
+                    !(StringContainsCaseInsensitive(item.Name, filter) ||
+                      StringContainsCaseInsensitive(item.MapName, filter) ||
+                      StringContainsCaseInsensitive(item.GameMode, filter)))
                     good = false;
                 if (good)
                     list2.insertLast(item);
