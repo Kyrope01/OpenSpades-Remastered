@@ -64,6 +64,7 @@ namespace spades {
 		class PaletteView;
 		class TCProgressView;
 		class ClientPlayer;
+		class BloodMarks;
 
 		class ClientUI;
 
@@ -334,6 +335,7 @@ namespace spades {
 			float mapReceivingProgressSmoothed = 0.0;
 
 			std::list<std::unique_ptr<ILocalEntity>> localEntities;
+			std::unique_ptr<BloodMarks> bloodMarks;
 			std::list<std::unique_ptr<Corpse>> corpses;
 			Corpse *lastMyCorpse;
 			float corpseSoftTimeLimit;

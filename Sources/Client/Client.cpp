@@ -33,6 +33,7 @@
 #include "IAudioChunk.h"
 #include "IAudioDevice.h"
 
+#include "BloodMarks.h"
 #include "CenterMessageView.h"
 #include "ChatWindow.h"
 #include "ClientPlayer.h"
@@ -216,6 +217,7 @@ namespace spades {
 
 			RemoveAllLocalEntities();
 			RemoveAllCorpses();
+			bloodMarks.reset();
 
 			renderer->SetGameMap(nullptr);
 			audioDevice->SetGameMap(nullptr);
@@ -245,6 +247,7 @@ namespace spades {
 		void Client::DoInit() {
 			renderer->Init();
 			SmokeSpriteEntity::Preload(renderer);
+			bloodMarks.reset(new BloodMarks(*this));
 
 			renderer->RegisterImage("Textures/Fluid.png");
 			renderer->RegisterImage("Textures/WaterExpl.png");

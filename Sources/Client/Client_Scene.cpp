@@ -25,6 +25,7 @@
 #include <Core/Settings.h>
 #include <Core/Strings.h>
 
+#include "BloodMarks.h"
 #include "CTFGameMode.h"
 #include "Corpse.h"
 #include "GameMap.h"
@@ -631,6 +632,9 @@ namespace spades {
 						ent->Render3D();
 					}
 				}
+
+				if (bloodMarks)
+					bloodMarks->Draw();
 
 				// Draw block cursor
 				if (p) {

@@ -28,6 +28,7 @@
 #include "IAudioChunk.h"
 #include "IAudioDevice.h"
 
+#include "BloodMarks.h"
 #include "CenterMessageView.h"
 #include "ChatWindow.h"
 #include "ClientPlayer.h"
@@ -243,6 +244,9 @@ namespace spades {
 					localEntities.erase(its[i]);
 				}
 			}
+
+			if (bloodMarks)
+				bloodMarks->Update(dt);
 
 			corpseDispatch.Join();
 
@@ -948,6 +952,42 @@ namespace spades {
 			SPADES_MARK_FUNCTION();
 
 			SPAssert(type != HitTypeBlock);
+
+			// Project procedural blood droplets onto nearby terrain. The manager performs the
+			// setting check and keeps a strict cap on active marks.
+			if (bloodMarks && by) {
+				const bool byLocalPlayer = by == world->GetLocalPlayer();
+				const bool isMeleeHit = type == HitTypeMelee;
+				Vector3 dir = by->GetEye() - hitPos;
+				float distSqr = dir.GetPoweredLength();
+				dir = dir.Normalize();
+
+				float frontSpeed = 8.0f;
+				float backSpeed = 0.0f;
+				if (isMeleeHit) {
+					frontSpeed = 1.5f;
+				} else {
+					switch (by->GetWeapon()->GetWeaponType()) {
+						case RIFLE_WEAPON:
+							frontSpeed = 1.0f;
+							backSpeed = 21.0f;
+							break;
+						case SMG_WEAPON: {
+							float rnd = 20.0f * SampleRandomFloat();
+							if (distSqr < rnd * rnd) {
+								frontSpeed = 1.0f;
+								backSpeed = 12.0f;
+							}
+						} break;
+						default: break;
+					}
+				}
+
+				if (frontSpeed > 0.0f)
+					bloodMarks->Spatter(hitPos, dir * frontSpeed, byLocalPlayer);
+				if (backSpeed > 0.0f)
+					bloodMarks->Spatter(hitPos, dir * -backSpeed, byLocalPlayer);
+			}
 
 			// don't bleed local player
 			if (!IsFirstPerson(GetCameraMode()) || &GetCameraTargetPlayer() != hurtPlayer) {

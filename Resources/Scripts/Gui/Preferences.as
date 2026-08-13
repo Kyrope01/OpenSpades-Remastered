@@ -30,11 +30,6 @@ namespace spades {
         private spades::ui::UIElement @owner;
 
         private PreferenceTab @[] tabs;
-        private PreferenceTabButton @[] sectionButtons;
-        private int[] sectionGroups;
-        private int[] sectionRows;
-        private bool[] groupExpanded;
-        private int selectedSectionIndex = -1;
         private PreferenceTabButton @backButton;
         private spades::ui::Label @shade;
 
@@ -70,21 +65,6 @@ namespace spades {
             AddTab(MiscOptionsPanel(Manager, options, fontManager),
                    _Tr("Preferences", "System"));
 
-            // Expandable/dropdown subcategories. Selecting one also scrolls its existing
-            // OpenSpades settings panel to the corresponding heading.
-            AddSection(0, _Tr("Preferences", "Player Information"), 0);
-            AddSection(0, _Tr("Preferences", "Remastered Features"), 2);
-            AddSection(0, _Tr("Preferences", "Effects"), 8);
-            AddSection(0, _Tr("Preferences", "Feedbacks"), 15);
-            AddSection(0, _Tr("Preferences", "AoS Compatibility"), 19);
-            AddSection(0, _Tr("Preferences", "Misc"), 22);
-
-            AddSection(1, _Tr("Preferences", "Weapons/Tools"), 0);
-            AddSection(1, _Tr("Preferences", "Movement"), 16);
-            AddSection(1, _Tr("Preferences", "Misc"), 25);
-
-            AddSection(2, _Tr("Preferences", "Startup Window"), 0);
-
             PreferenceTabButton close(Manager);
             close.Caption = _Tr("Preferences", "Back");
             close.IsBackButton = true;
@@ -93,9 +73,6 @@ namespace spades {
             @backButton = close;
 
             SelectedTabIndex = Clamp(options.InitialTabIndex, 0, int(tabs.length) - 1);
-            for (uint i = 0; i < groupExpanded.length; i++)
-                groupExpanded[i] = int(i) == SelectedTabIndex;
-            selectedSectionIndex = FirstSectionInGroup(SelectedTabIndex);
 
             LayoutContents();
             UpdateTabs();
@@ -106,31 +83,10 @@ namespace spades {
             tab.Caption = caption;
             tab.TabButton.Caption = caption;
             tab.View.Visible = false;
-            @tab.TabButton.Activated = spades::ui::EventHandler(this.OnGroupButtonActivated);
+            @tab.TabButton.Activated = spades::ui::EventHandler(this.OnTabButtonActivated);
             AddChild(tab.View);
             AddChild(tab.TabButton);
             tabs.insertLast(tab);
-            groupExpanded.insertLast(false);
-        }
-
-        private void AddSection(int group, string caption, int row) {
-            PreferenceTabButton button(Manager);
-            button.Caption = "    " + caption;
-            button.IsSectionButton = true;
-            button.Toggle = true;
-            @button.Activated = spades::ui::EventHandler(this.OnSectionButtonActivated);
-            AddChild(button);
-            sectionButtons.insertLast(button);
-            sectionGroups.insertLast(group);
-            sectionRows.insertLast(row);
-        }
-
-        private int FirstSectionInGroup(int group) {
-            for (uint i = 0; i < sectionButtons.length; i++) {
-                if (sectionGroups[i] == group)
-                    return int(i);
-            }
-            return -1;
         }
 
         private void LayoutContents() {
@@ -141,23 +97,11 @@ namespace spades {
             float rowHeight = 29.f;
             float rowGap = 3.f;
 
-            for (uint group = 0; group < tabs.length; group++) {
-                tabs[group].TabButton.Caption =
-                    tabs[group].Caption + (groupExpanded[group] ? "  [-]" : "  [+]");
-                tabs[group].TabButton.Bounds =
+            for (uint i = 0; i < tabs.length; i++) {
+                tabs[i].TabButton.Caption = tabs[i].Caption;
+                tabs[i].TabButton.Bounds =
                     AABB2(ContentsLeft + 5.f, y, sidebarWidth - 10.f, rowHeight);
                 y += rowHeight + rowGap;
-
-                for (uint section = 0; section < sectionButtons.length; section++) {
-                    if (sectionGroups[section] != int(group))
-                        continue;
-                    sectionButtons[section].Visible = groupExpanded[group];
-                    if (groupExpanded[group]) {
-                        sectionButtons[section].Bounds =
-                            AABB2(ContentsLeft + 5.f, y, sidebarWidth - 10.f, rowHeight - 2.f);
-                        y += rowHeight;
-                    }
-                }
             }
 
             backButton.Bounds = AABB2(ContentsLeft + 5.f,
@@ -180,46 +124,13 @@ namespace spades {
             UIElement::OnResized();
         }
 
-        private void OnGroupButtonActivated(spades::ui::UIElement @sender) {
+        private void OnTabButtonActivated(spades::ui::UIElement @sender) {
             for (uint i = 0; i < tabs.length; i++) {
-                if (cast<spades::ui::UIElement>(tabs[i].TabButton) !is sender)
-                    continue;
-
-                if (SelectedTabIndex == int(i))
-                    groupExpanded[i] = !groupExpanded[i];
-                else {
-                    for (uint group = 0; group < groupExpanded.length; group++)
-                        groupExpanded[group] = group == i;
+                if (cast<spades::ui::UIElement>(tabs[i].TabButton) is sender) {
                     SelectedTabIndex = int(i);
-                    selectedSectionIndex = FirstSectionInGroup(int(i));
-                    ScrollSelectedPanelTo(0);
+                    UpdateTabs();
+                    return;
                 }
-                LayoutContents();
-                UpdateTabs();
-                return;
-            }
-        }
-
-        private void OnSectionButtonActivated(spades::ui::UIElement @sender) {
-            for (uint i = 0; i < sectionButtons.length; i++) {
-                if (cast<spades::ui::UIElement>(sectionButtons[i]) !is sender)
-                    continue;
-                SelectedTabIndex = sectionGroups[i];
-                selectedSectionIndex = int(i);
-                groupExpanded[SelectedTabIndex] = true;
-                ScrollSelectedPanelTo(sectionRows[i]);
-                UpdateTabs();
-                return;
-            }
-        }
-
-        private void ScrollSelectedPanelTo(int row) {
-            if (SelectedTabIndex == 0) {
-                GameOptionsPanel @panel = cast<GameOptionsPanel>(tabs[0].View);
-                panel.ScrollToSection(row);
-            } else if (SelectedTabIndex == 1) {
-                ControlOptionsPanel @panel = cast<ControlOptionsPanel>(tabs[1].View);
-                panel.ScrollToSection(row);
             }
         }
 
@@ -229,8 +140,6 @@ namespace spades {
                 tabs[i].TabButton.Toggled = selected;
                 tabs[i].View.Visible = selected;
             }
-            for (uint i = 0; i < sectionButtons.length; i++)
-                sectionButtons[i].Toggled = int(i) == selectedSectionIndex;
         }
 
         private void OnClosePressed(spades::ui::UIElement @sender) { Close(); }
@@ -289,7 +198,6 @@ namespace spades {
     }
 
     class PreferenceTabButton : spades::ui::Button {
-        bool IsSectionButton = false;
         bool IsBackButton = false;
 
         PreferenceTabButton(spades::ui::UIManager @manager) {
@@ -303,8 +211,7 @@ namespace spades {
             Vector2 size = Size;
             Image @white = renderer.RegisterImage("Gfx/White.tga");
 
-            Vector4 fill = IsSectionButton ? Vector4(0.12f, 0.13f, 0.15f, 0.72f)
-                                           : Vector4(0.31f, 0.33f, 0.35f, 0.78f);
+            Vector4 fill = Vector4(0.31f, 0.33f, 0.35f, 0.78f);
             Vector4 edge = Vector4(1.f, 1.f, 1.f, 0.16f);
             if (IsBackButton) {
                 fill = Vector4(0.43f, 0.10f, 0.10f, 0.82f);
@@ -324,9 +231,8 @@ namespace spades {
             renderer.DrawImage(white, AABB2(pos.x, pos.y, 1.f, size.y));
             renderer.DrawImage(white, AABB2(pos.x + size.x - 1.f, pos.y, 1.f, size.y));
 
-            float left = IsSectionButton ? 8.f : 10.f;
             Vector2 textSize = Font.Measure(Caption);
-            Font.DrawShadow(Caption, pos + Vector2(left, (size.y - textSize.y) * 0.5f), 1.f,
+            Font.DrawShadow(Caption, pos + Vector2(10.f, (size.y - textSize.y) * 0.5f), 1.f,
                             Vector4(0.96f, 0.97f, 0.99f, 1.f),
                             Vector4(0.f, 0.f, 0.f, 0.55f));
         }
@@ -616,18 +522,110 @@ namespace spades {
 
     class StandardPreferenceLayouterModel : spades::ui::ListViewModel {
         private spades::ui::UIElement @[] @items;
-        StandardPreferenceLayouterModel(spades::ui::UIElement @[] @items) { @this.items = items; }
-        int NumRows {
-            get { return int(items.length); }
+        private int[] @categories;
+        private bool[] @headingItems;
+        private bool[] @expandedCategories;
+        private spades::ui::UIElement @[] visibleItems;
+        private spades::ui::ListView @listView;
+
+        StandardPreferenceLayouterModel(spades::ui::UIElement @[] @items, int[] @categories,
+                                        bool[] @headingItems, bool[] @expandedCategories) {
+            @this.items = items;
+            @this.categories = categories;
+            @this.headingItems = headingItems;
+            @this.expandedCategories = expandedCategories;
+            Rebuild();
         }
-        spades::ui::UIElement @CreateElement(int row) { return items[row]; }
+
+        private void Rebuild() {
+            visibleItems.resize(0);
+            for (uint i = 0; i < items.length; i++) {
+                int category = categories[i];
+                if (headingItems[i] or expandedCategories[category])
+                    visibleItems.insertLast(items[i]);
+            }
+        }
+
+        void AttachList(spades::ui::ListView @list) { @listView = list; }
+
+        bool IsCategoryExpanded(int category) const {
+            return expandedCategories[category];
+        }
+
+        void ToggleCategory(int category) {
+            expandedCategories[category] = not expandedCategories[category];
+            Rebuild();
+            if (listView !is null)
+                listView.Reload();
+        }
+
+        int NumRows {
+            get { return int(visibleItems.length); }
+        }
+        spades::ui::UIElement @CreateElement(int row) { return visibleItems[row]; }
         void RecycleElement(spades::ui::UIElement @elem) {}
+    }
+
+    /** A KyroSpades-style treenode row which expands or collapses its settings in-place. */
+    class PreferenceCategoryButton : spades::ui::Button {
+        private StandardPreferenceLayouterModel @model;
+        private int category;
+        private string text;
+
+        PreferenceCategoryButton(spades::ui::UIManager @manager, string text, int category,
+                                 FontManager @fontManager) {
+            super(manager);
+            this.text = text;
+            this.category = category;
+            Alignment = Vector2(0.f, 0.5f);
+            @Font = fontManager.HeadingFont;
+        }
+
+        void SetModel(StandardPreferenceLayouterModel @model) { @this.model = model; }
+
+        void OnActivated() {
+            spades::ui::Button::OnActivated();
+            if (model !is null)
+                model.ToggleCategory(category);
+        }
+
+        void Render() {
+            Renderer @renderer = Manager.Renderer;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            bool expanded = model is null or model.IsCategoryExpanded(category);
+
+            Vector4 fill = Vector4(0.10f, 0.12f, 0.15f, 0.88f);
+            if ((Pressed and Hover) or Toggled)
+                fill = Vector4(0.18f, 0.24f, 0.30f, 0.92f);
+            else if (Hover)
+                fill = Vector4(0.15f, 0.19f, 0.24f, 0.91f);
+            renderer.ColorNP = fill;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
+
+            renderer.ColorNP = Vector4(0.48f, 0.72f, 0.94f, Hover ? 0.90f : 0.62f);
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, 3.f, size.y));
+            renderer.DrawImage(white, AABB2(pos.x + 3.f, pos.y + size.y - 1.f,
+                                           size.x - 3.f, 1.f));
+
+            string caption = (expanded ? "[-]  " : "[+]  ") + text;
+            Vector2 textSize = Font.Measure(caption);
+            Font.DrawShadow(caption, pos + Vector2(12.f, (size.y - textSize.y) * 0.5f), 1.f,
+                            Vector4(0.94f, 0.97f, 1.f, 1.f),
+                            Vector4(0.f, 0.f, 0.f, 0.65f));
+        }
     }
     class StandardPreferenceLayouter {
         spades::ui::UIElement @Parent;
         private float FieldX = 250.f;
         private float FieldWidth = 310.f;
         private spades::ui::UIElement @[] items;
+        private int[] itemCategories;
+        private bool[] headingItems;
+        private bool[] expandedCategories;
+        private PreferenceCategoryButton @[] categoryButtons;
+        private int currentCategory = -1;
         private ConfigHotKeyField @[] hotkeyItems;
         private FontManager @fontManager;
 
@@ -644,8 +642,12 @@ namespace spades {
             spades::ui::UIElement elem(Parent.Manager);
             elem.Size = Vector2(FieldX + FieldWidth + 20.f, 32.f);
             items.insertLast(elem);
+            itemCategories.insertLast(currentCategory);
+            headingItems.insertLast(false);
             return elem;
         }
+
+        spades::ui::UIElement @AddCustomItem() { return CreateItem(); }
 
         private void OnKeyBound(spades::ui::UIElement @sender) {
             // unbind already bound key
@@ -662,14 +664,15 @@ namespace spades {
         }
 
         void AddHeading(string text) {
-            spades::ui::UIElement @container = CreateItem();
+            currentCategory++;
+            expandedCategories.insertLast(true);
 
-            spades::ui::Label label(Parent.Manager);
-            label.Text = text;
-            label.Alignment = Vector2(0.f, 1.f);
-            @label.Font = fontManager.HeadingFont;
-            label.Bounds = AABB2(10.f, 0.f, FieldX - 20.f, 32.f);
-            container.AddChild(label);
+            PreferenceCategoryButton button(Parent.Manager, text, currentCategory, fontManager);
+            button.Size = Vector2(FieldX + FieldWidth + 20.f, 32.f);
+            items.insertLast(button);
+            itemCategories.insertLast(currentCategory);
+            headingItems.insertLast(true);
+            categoryButtons.insertLast(button);
         }
 
         ConfigField @AddInputField(string caption, string configName, bool enabled = true) {
@@ -761,7 +764,12 @@ namespace spades {
 
         spades::ui::ListView @FinishLayout() {
             spades::ui::ListView list(Parent.Manager);
-            @list.Model = StandardPreferenceLayouterModel(items);
+            StandardPreferenceLayouterModel model(items, itemCategories, headingItems,
+                                                  expandedCategories);
+            for (uint i = 0; i < categoryButtons.length; i++)
+                categoryButtons[i].SetModel(model);
+            @list.Model = model;
+            model.AttachList(list);
             list.RowHeight = 32.f;
             list.Bounds = AABB2(0.f, 0.f, Max(580.f, Parent.Size.x), Max(400.f, Parent.Size.y));
             Parent.AddChild(list);
@@ -802,6 +810,7 @@ namespace spades {
 
             layouter.AddHeading(_Tr("Preferences", "Effects"));
             layouter.AddToggleField(_Tr("Preferences", "Blood"), "cg_blood");
+            layouter.AddToggleField(_Tr("Preferences", "Terrain Blood Marks"), "cg_bloodMarks");
             layouter.AddToggleField(_Tr("Preferences", "Ejecting Brass"), "cg_ejectBrass");
             layouter.AddToggleField(_Tr("Preferences", "Ragdoll"), "cg_ragdoll");
             layouter.AddToggleField(_Tr("Preferences", "Animations"), "cg_animations");
@@ -907,8 +916,9 @@ namespace spades {
     }
 
     class MiscOptionsPanel : spades::ui::UIElement {
-        spades::ui::Label @msgLabel;
-        spades::ui::Button @enableButton;
+        private spades::ui::ListView @listView;
+        private spades::ui::Label @msgLabel;
+        private spades::ui::Button @enableButton;
 
         private ConfigItem cl_showStartupWindow("cl_showStartupWindow");
 
@@ -916,31 +926,35 @@ namespace spades {
                          FontManager @fontManager) {
             super(manager);
 
+            StandardPreferenceLayouter layouter(this, fontManager);
+            layouter.AddHeading(_Tr("Preferences", "Startup Window"));
+
             {
+                spades::ui::UIElement @container = layouter.AddCustomItem();
                 spades::ui::Button e(Manager);
-                e.Bounds = AABB2(10.f, 10.f, 400.f, 30.f);
+                e.Bounds = AABB2(10.f, 1.f, 430.f, 30.f);
                 e.Caption = _Tr("Preferences", "Enable Startup Window");
                 @e.Activated = spades::ui::EventHandler(this.OnEnableClicked);
-                AddChild(e);
+                container.AddChild(e);
                 @enableButton = e;
             }
 
             {
+                spades::ui::UIElement @container = layouter.AddCustomItem();
                 spades::ui::Label label(Manager);
-                label.Bounds = AABB2(10.f, 50.f, 0.f, 0.f);
-                label.Text = "Hoge";
-                AddChild(label);
+                label.Bounds = AABB2(12.f, 0.f, 700.f, 32.f);
+                label.Text = "";
+                container.AddChild(label);
                 @msgLabel = label;
             }
 
+            @listView = layouter.FinishLayout();
             UpdateState();
         }
 
         void OnResized() {
-            if (enableButton !is null) {
-                enableButton.Bounds = AABB2(10.f, 10.f, Min(430.f, Size.x - 20.f), 30.f);
-                msgLabel.Bounds = AABB2(12.f, 52.f, Max(100.f, Size.x - 24.f), 32.f);
-            }
+            if (listView !is null)
+                listView.Bounds = AABB2(0.f, 0.f, Size.x, Size.y);
             UIElement::OnResized();
         }
 
