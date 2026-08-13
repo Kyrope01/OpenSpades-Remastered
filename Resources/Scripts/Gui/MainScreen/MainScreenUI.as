@@ -55,6 +55,9 @@ namespace spades {
             @mainMenu = MainScreenMainMenu(this);
             mainMenu.Bounds = manager.RootElement.Bounds;
             manager.RootElement.AddChild(mainMenu);
+            // ListView needs its final height before installing the initial empty model; otherwise
+            // both the scroll range and page size are zero while ScrollBar lays itself out.
+            mainMenu.LoadServerList();
 
             // Let the new player choose their IGN
             if (cg_playerName.StringValue != "" && cg_playerName.StringValue != "Deuce") {

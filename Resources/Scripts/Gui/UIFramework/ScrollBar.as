@@ -316,9 +316,13 @@ namespace spades {
 
             float TrackBarLength {
                 get {
-                    return Max(TrackBarAreaLength *
-                                   (LargeChange / (MaxValue - MinValue + LargeChange)),
-                               40.f);
+                    double totalRange = MaxValue - MinValue + LargeChange;
+                    if (totalRange <= 0.0) {
+                        // A ListView can briefly be empty and unbounded while its owner is being
+                        // constructed. In that state both its scroll range and page size are zero.
+                        return Max(TrackBarAreaLength, 0.f);
+                    }
+                    return Max(TrackBarAreaLength * (LargeChange / totalRange), 40.f);
                 }
             }
 

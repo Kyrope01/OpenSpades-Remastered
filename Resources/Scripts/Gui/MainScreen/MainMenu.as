@@ -391,7 +391,9 @@ namespace spades {
             serverListErrorView.Visible = false;
             AddChild(serverListErrorView);
 
-            LoadServerList();
+            // MainScreenUI starts the query after assigning this menu's initial bounds. Setting
+            // the empty model while the list still has zero height would leave its scroll range
+            // and page size at zero during ScrollBar.Layout().
         }
 
         private MainScreenNavigationButton @MakeNavigationButton(string caption) {
