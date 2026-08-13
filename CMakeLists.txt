@@ -94,17 +94,19 @@ else()
 endif()
 
 
-if(CMAKE_COMPILER_IS_GNUCXX)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 	# GCC C++11 support
 	# from http://stackoverflow.com/questions/10984442/how-to-detect-c11-support-of-a-compiler-with-cmake
 	#
-	execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion OUTPUT_VARIABLE GCC_VERSION)
+	# Query the C++ compiler itself. This project enables both C and C++, but a
+	# toolchain is allowed to provide different compiler executables.
+	execute_process(COMMAND ${CMAKE_CXX_COMPILER} -dumpversion OUTPUT_VARIABLE GCC_VERSION)
 	if (GCC_VERSION VERSION_GREATER 4.7 OR GCC_VERSION VERSION_EQUAL 4.7)
 		message(STATUS "C++11 activated.")
-		add_definitions("-std=gnu++11")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
 	elseif(GCC_VERSION VERSION_GREATER 4.3 OR GCC_VERSION VERSION_EQUAL 4.3)
 		message(WARNING "C++0x activated. If you get any errors update to a compiler which fully supports C++11")
-		add_definitions("-std=gnu++0x")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++0x")
 	else ()
 		message(FATAL_ERROR "C++11 needed. Therefore a gcc compiler with a version higher than 4.3 is needed.")
 	endif()
@@ -115,12 +117,13 @@ if(CMAKE_COMPILER_IS_GNUCXX)
 		-Wno-unknown-pragmas #learn_more: output is spammed like shit by all those #pragma mark items
 	)
 
-	if(CMAKE_BUILD_TYPE MATCHES "Release")
+	if(CMAKE_BUILD_TYPE STREQUAL "Release")
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-		set(CMAKE_EXE_LINKER_FLAGS "-s")
+		# Preserve linker flags supplied by a caller or toolchain file.
+		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
 	endif()
 
-elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(Apple)?Clang$")
 	# Clang C++11 support
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
 
@@ -130,9 +133,10 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
 		-Wno-unused-parameter
 	)
 
-	if(CMAKE_BUILD_TYPE MATCHES "Release")
+	if(CMAKE_BUILD_TYPE STREQUAL "Release")
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-		set(CMAKE_EXE_LINKER_FLAGS "-s")
+		# Preserve linker flags supplied by a caller or toolchain file.
+		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
 	endif()
 
 elseif(MSVC)
@@ -144,6 +148,32 @@ elseif(MSVC)
 	)
 	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")	#static link to msv runtime (MSVCR(P)xxx.dll)
 	#set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+endif()
+
+# Let CMake select the correct IPO/LTO flags for GCC, Clang/AppleClang, and
+# MSVC.  The capability check keeps unsupported or unusual toolchains on the
+# normal optimized code path instead of risking an unusable build.
+option(OPENSPADES_ENABLE_IPO
+	"Enable interprocedural optimization for optimized builds when supported" ON)
+set(OPENSPADES_IPO_SUPPORTED OFF)
+if(OPENSPADES_ENABLE_IPO)
+	if(POLICY CMP0069)
+		cmake_policy(SET CMP0069 NEW)
+		# The bundled AngelScript directories declare an older policy scope.
+		# Supply the same default there so their static libraries participate.
+		set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+		include(CheckIPOSupported)
+		check_ipo_supported(
+			RESULT OPENSPADES_IPO_SUPPORTED
+			OUTPUT OPENSPADES_IPO_ERROR)
+		if(OPENSPADES_IPO_SUPPORTED)
+			message(STATUS "IPO / LTO enabled for optimized builds")
+		else()
+			message(STATUS "IPO / LTO unavailable: ${OPENSPADES_IPO_ERROR}")
+		endif()
+	else()
+		message(STATUS "IPO / LTO unavailable: CMake 3.9 or newer is required")
+	endif()
 endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)	#msvc / xcode: group files in project
