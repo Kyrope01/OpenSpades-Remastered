@@ -335,7 +335,12 @@ namespace spades {
 								p3 += uu;
 								p3 += vv;
 							} else {
-								*(pixels++) = 0x00ff00ff;
+								// No neighbouring voxel can provide a color. Extend the previous
+								// texel (or use black at the start of a row) instead of stamping a
+								// magenta sentinel into the atlas. Otherwise the sentinel can bleed
+								// into face edges when voxel models are heavily downscaled.
+								*pixels = (x > 0) ? pixels[-1] : 0;
+								pixels++;
 								p2 += uu;
 								continue;
 							}
