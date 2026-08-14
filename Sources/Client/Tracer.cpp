@@ -80,7 +80,10 @@ namespace spades {
 				}
 				light.radius = std::min(10.f, std::max(5.f, streakLength * 0.75f + 2.f));
 				light.color = MakeVector3(2.4f, .9f, .25f) * lightIntensity;
-				light.ignoreGlobalDisable = true;
+				// Tracers can overlap heavily during automatic and shotgun fire. Let the
+				// renderer retain only the nearest few cosmetic lights, and honor the
+				// global dynamic-light switch.
+				light.lowPriority = true;
 				r->AddLight(light);
 			}
 

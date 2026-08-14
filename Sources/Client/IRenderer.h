@@ -94,6 +94,10 @@ namespace spades {
 			/** Allows an explicitly enabled effect to keep this light active when
 			 * the global dynamic-light setting is disabled. */
 			bool ignoreGlobalDisable = false;
+
+			/** Marks short-lived cosmetic lights which may be discarded under load.
+			 * Core gameplay lights such as explosions and muzzle flashes stay uncapped. */
+			bool lowPriority = false;
 		};
 
 		class IRenderer : public RefCountedObject {

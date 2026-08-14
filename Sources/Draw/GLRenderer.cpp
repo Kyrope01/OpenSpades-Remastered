@@ -18,6 +18,7 @@
 
  */
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdlib>
 
@@ -576,6 +577,51 @@ namespace spades {
 				visible |= SphereFrustrumCull(cullOrigin, cullRadius, true);
 			if (!visible)
 				return;
+
+			if (light.lowPriority) {
+				// Every dynamic light adds work to terrain, models, sprites, and the mirrored
+				// scene. Automatic fire used to grow this list without bound, making frame
+				// rate depend heavily on the number of visible tracers. Keep the closest
+				// cosmetic lights while never evicting gameplay lights.
+				const size_t maxLowPriorityLights = 4;
+				auto distanceToViewSquared = [&](const client::DynamicLightParam &param) {
+					Vector3 closest = param.origin;
+					if (param.type == client::DynamicLightTypeLinear) {
+						Vector3 segment = param.point2 - param.origin;
+						float lengthSquared = segment.GetPoweredLength();
+						if (lengthSquared > 1.e-8f) {
+							float t = Vector3::Dot(sceneDef.viewOrigin - param.origin, segment) /
+							          lengthSquared;
+							t = std::min(1.f, std::max(0.f, t));
+							closest += segment * t;
+						}
+					}
+					return (closest - sceneDef.viewOrigin).GetPoweredLength();
+				};
+
+				size_t lowPriorityCount = 0;
+				float farthestDistance = -1.f;
+				std::vector<GLDynamicLight>::iterator farthest = lights.end();
+				for (auto it = lights.begin(); it != lights.end(); ++it) {
+					const client::DynamicLightParam &existing = it->GetParam();
+					if (!existing.lowPriority)
+						continue;
+					++lowPriorityCount;
+					float distance = distanceToViewSquared(existing);
+					if (distance > farthestDistance) {
+						farthestDistance = distance;
+						farthest = it;
+					}
+				}
+
+				if (lowPriorityCount >= maxLowPriorityLights) {
+					if (distanceToViewSquared(light) >= farthestDistance)
+						return;
+					*farthest = GLDynamicLight(light);
+					return;
+				}
+			}
+
 			EnsureInitialized();
 			EnsureSceneStarted();
 			lights.push_back(GLDynamicLight(light));
