@@ -24,12 +24,15 @@ namespace spades {
         string Name;
         bool Selected;
         bool Loaded;
+        int Priority;
 
-        ModListItem(spades::ui::UIManager @manager, string name, bool selected, bool loaded) {
+        ModListItem(spades::ui::UIManager @manager, string name, bool selected, bool loaded,
+                    int priority) {
             super(manager);
             Name = name;
             Selected = selected;
             Loaded = loaded;
+            Priority = priority;
         }
 
         private string FitText(string text, float width) {
@@ -73,7 +76,8 @@ namespace spades {
 
             string state = "";
             if (Selected && Loaded)
-                state = _Tr("MainScreen", "Enabled");
+                state = Priority == 0 ? _Tr("MainScreen", "Enabled - highest priority")
+                                      : _Tr("MainScreen", "Enabled");
             else if (Selected)
                 state = _Tr("MainScreen", "Selected - restart required");
             else if (Loaded)
@@ -97,17 +101,33 @@ namespace spades {
     class ModListModel : spades::ui::ListViewModel {
         private spades::ui::UIManager @manager;
         private string[] mods;
-        private string selectedMod;
-        private string loadedMod;
+        private int[] priority;
+        private bool[] loaded;
 
         ModListItemEventHandler @ItemDoubleClicked;
 
-        ModListModel(spades::ui::UIManager @manager, string[] @mods, string selectedMod,
-                     string loadedMod) {
+        ModListModel(spades::ui::UIManager @manager, string[] @mods, string[] @selectedMods,
+                     string[] @loadedMods) {
             @this.manager = manager;
             this.mods = mods;
-            this.selectedMod = selectedMod;
-            this.loadedMod = loadedMod;
+            for (uint i = 0; i < mods.length; i++) {
+                int modPriority = -1;
+                bool isLoaded = false;
+                for (uint j = 0; j < selectedMods.length; j++) {
+                    if (mods[i] == selectedMods[j]) {
+                        modPriority = int(j);
+                        break;
+                    }
+                }
+                for (uint j = 0; j < loadedMods.length; j++) {
+                    if (mods[i] == loadedMods[j]) {
+                        isLoaded = true;
+                        break;
+                    }
+                }
+                priority.insertLast(modPriority);
+                loaded.insertLast(isLoaded);
+            }
         }
 
         int NumRows {
@@ -120,9 +140,16 @@ namespace spades {
                 ItemDoubleClicked(this, item.Name);
         }
 
+        bool IsSelected(string name) {
+            for (uint i = 0; i < mods.length; i++) {
+                if (mods[i] == name)
+                    return priority[i] >= 0;
+            }
+            return false;
+        }
+
         spades::ui::UIElement @CreateElement(int row) {
-            ModListItem item(manager, mods[row], mods[row] == selectedMod,
-                             mods[row] == loadedMod);
+            ModListItem item(manager, mods[row], priority[row] >= 0, loaded[row], priority[row]);
             @item.DoubleClicked = spades::ui::EventHandler(this.OnItemDoubleClicked);
             return item;
         }

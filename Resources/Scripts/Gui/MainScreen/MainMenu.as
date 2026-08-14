@@ -407,14 +407,14 @@ namespace spades {
             AddChild(modsTitle);
 
             @modsHelp = spades::ui::Label(Manager);
-            modsHelp.Text = _Tr("MainScreen", "Double-click a .pak, .zip, or .pzk archive to enable it.");
+            modsHelp.Text = _Tr("MainScreen", "Double-click to toggle .pak, .zip, or .pzk mods; multiple may be enabled.");
             modsHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
             modsHelp.Alignment = Vector2(0.f, 0.5f);
             AddChild(modsHelp);
 
             @modsApplyHelp = spades::ui::Label(Manager);
             modsApplyHelp.Text =
-                _Tr("MainScreen", "OpenSpades restarts automatically after a mod change so every resource loads together safely.");
+                _Tr("MainScreen", "Latest enabled mod wins file conflicts. Changes restart OpenSpades safely.");
             modsApplyHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
             modsApplyHelp.Alignment = Vector2(0.f, 0.5f);
             AddChild(modsApplyHelp);
@@ -434,7 +434,7 @@ namespace spades {
             AddChild(modsEmptyLabel);
 
             @disableModsButton = spades::ui::Button(Manager);
-            disableModsButton.Caption = _Tr("MainScreen", "Disable Mod");
+            disableModsButton.Caption = _Tr("MainScreen", "Disable All Mods");
             @disableModsButton.Activated = spades::ui::EventHandler(this.DisableModsButtonPressed);
             AddChild(disableModsButton);
 
@@ -493,26 +493,44 @@ namespace spades {
             modsButton.Toggled = modsPageVisible;
         }
 
+        private bool ModListsEqual(string[] @a, string[] @b) {
+            if (a.length != b.length)
+                return false;
+            for (uint i = 0; i < a.length; i++) {
+                if (a[i] != b[i])
+                    return false;
+            }
+            return true;
+        }
+
         private void RefreshMods() {
             string[] @mods = ui.helper.GetMods();
+            string[] @selectedMods = ui.helper.GetActiveMods();
+            string[] @loadedMods = ui.helper.GetLoadedMods();
             if (mods is null)
                 @mods = array<string>();
-            string selectedMod = ui.helper.ActiveMod;
-            string loadedMod = ui.helper.LoadedMod;
-            ModListModel model(Manager, mods, selectedMod, loadedMod);
+            if (selectedMods is null)
+                @selectedMods = array<string>();
+            if (loadedMods is null)
+                @loadedMods = array<string>();
+            ModListModel model(Manager, mods, selectedMods, loadedMods);
             @model.ItemDoubleClicked = ModListItemEventHandler(this.ModListItemDoubleClicked);
             @modsListView.Model = model;
 
-            disableModsButton.Enable = selectedMod.length > 0 || loadedMod.length > 0;
-            if (selectedMod.length > 0 && selectedMod == loadedMod) {
-                modsStatus.Text = _Tr("MainScreen", "Enabled: {0}", loadedMod);
+            disableModsButton.Enable = selectedMods.length > 0 || loadedMods.length > 0;
+            if (selectedMods.length > 0 && ModListsEqual(selectedMods, loadedMods)) {
+                int count = int(selectedMods.length);
+                modsStatus.Text = _TrN("MainScreen", "{0} mod enabled.", "{0} mods enabled.",
+                                       count, ToString(count));
                 modsStatus.TextColor = Vector4(1.f, 0.88f, 0.18f, 1.f);
-            } else if (selectedMod.length > 0) {
-                modsStatus.Text =
-                    _Tr("MainScreen", "Selected: {0} - restart required", selectedMod);
+            } else if (selectedMods.length > 0) {
+                int count = int(selectedMods.length);
+                modsStatus.Text = _TrN("MainScreen", "{0} mod selected - restart required",
+                                       "{0} mods selected - restart required", count,
+                                       ToString(count));
                 modsStatus.TextColor = Vector4(1.f, 0.72f, 0.16f, 1.f);
-            } else if (loadedMod.length > 0) {
-                modsStatus.Text = _Tr("MainScreen", "Restart to disable: {0}", loadedMod);
+            } else if (loadedMods.length > 0) {
+                modsStatus.Text = _Tr("MainScreen", "Restart required to disable all mods.");
                 modsStatus.TextColor = Vector4(1.f, 0.72f, 0.16f, 1.f);
             } else {
                 modsStatus.Text = _Tr("MainScreen", "No mod is enabled.");
@@ -522,11 +540,14 @@ namespace spades {
         }
 
         private void ModListItemDoubleClicked(ModListModel @sender, string name) {
-            string error = ui.helper.SetActiveMod(name);
+            bool enable = !sender.IsSelected(name);
+            string error = ui.helper.SetModEnabled(name, enable);
             if (error.length > 0) {
-                AlertScreen alert(this, _Tr("MainScreen", "Failed to enable mod") + ":\n\n" + error);
+                string message = enable ? _Tr("MainScreen", "Failed to enable mod")
+                                        : _Tr("MainScreen", "Failed to disable mod");
+                AlertScreen alert(this, message + ":\n\n" + error);
                 alert.Run();
-            } else if (name != ui.helper.LoadedMod) {
+            } else {
                 ui.helper.RestartForModChange();
                 return;
             }
@@ -723,12 +744,11 @@ namespace spades {
         }
 
         private void DisableModsButtonPressed(spades::ui::UIElement @sender) {
-            bool restartRequired = ui.helper.LoadedMod.length > 0;
-            string error = ui.helper.SetActiveMod("");
+            string error = ui.helper.DisableAllMods();
             if (error.length > 0) {
-                AlertScreen alert(this, _Tr("MainScreen", "Failed to disable mod") + ":\n\n" + error);
+                AlertScreen alert(this, _Tr("MainScreen", "Failed to disable mods") + ":\n\n" + error);
                 alert.Run();
-            } else if (restartRequired) {
+            } else {
                 ui.helper.RestartForModChange();
                 return;
             }

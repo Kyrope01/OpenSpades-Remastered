@@ -44,6 +44,17 @@ namespace spades {
 		struct CURLEasyDeleter {
 			void operator()(CURL *ptr) const { curl_easy_cleanup(ptr); }
 		};
+
+		CScriptArray *CreateStringArray(std::vector<std::string> values) {
+			asIScriptEngine *engine = ScriptManager::GetInstance()->GetEngine();
+			asITypeInfo *arrayType = engine->GetTypeInfoByDecl("array<string>");
+			SPAssert(arrayType != nullptr);
+			CScriptArray *array =
+			  CScriptArray::Create(arrayType, static_cast<asUINT>(values.size()));
+			for (size_t i = 0; i < values.size(); ++i)
+				array->SetValue(static_cast<asUINT>(i), &values[i]);
+			return array;
+		}
 	}
 
 	class ServerItem {
@@ -390,24 +401,22 @@ namespace spades {
 		}
 
 		CScriptArray *MainScreenHelper::GetMods() {
-			std::vector<std::string> mods = GetAvailableUserMods();
-			asIScriptEngine *engine = ScriptManager::GetInstance()->GetEngine();
-			asITypeInfo *arrayType = engine->GetTypeInfoByDecl("array<string>");
-			SPAssert(arrayType != nullptr);
-			CScriptArray *array =
-			  CScriptArray::Create(arrayType, static_cast<asUINT>(mods.size()));
-			for (size_t i = 0; i < mods.size(); ++i)
-				array->SetValue(static_cast<asUINT>(i), &mods[i]);
-			return array;
+			return CreateStringArray(GetAvailableUserMods());
 		}
 
-		std::string MainScreenHelper::GetActiveMod() { return GetActiveUserMod(); }
-
-		std::string MainScreenHelper::GetLoadedMod() { return GetLoadedUserMod(); }
-
-		std::string MainScreenHelper::SetActiveMod(std::string name) {
-			return SetActiveUserMod(name);
+		CScriptArray *MainScreenHelper::GetActiveMods() {
+			return CreateStringArray(GetActiveUserMods());
 		}
+
+		CScriptArray *MainScreenHelper::GetLoadedMods() {
+			return CreateStringArray(GetLoadedUserMods());
+		}
+
+		std::string MainScreenHelper::SetModEnabled(std::string name, bool enabled) {
+			return SetUserModEnabled(name, enabled);
+		}
+
+		std::string MainScreenHelper::DisableAllMods() { return DisableAllUserMods(); }
 
 		void MainScreenHelper::RestartForModChange() { mainScreen->RequestRestart(); }
 

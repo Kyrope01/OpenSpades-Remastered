@@ -941,7 +941,7 @@ namespace spades {
 
             layouter.AddMainCategory(_Tr("Preferences", "Graphics"));
             layouter.AddHeading(_Tr("Preferences", "View"));
-            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
+            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 110, 1,
                                     ConfigNumberFormatter(0, " deg"));
             layouter.AddToggleField(_Tr("Preferences", "Filmic Tonemapping"),
                                     "r_filmicToneMapping");

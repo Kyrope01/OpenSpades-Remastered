@@ -97,18 +97,23 @@ namespace spades {
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",
-												  "string get_ActiveMod()",
-												  asMETHOD(gui::MainScreenHelper, GetActiveMod),
+												  "array<string>@ GetActiveMods()",
+												  asMETHOD(gui::MainScreenHelper, GetActiveMods),
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",
-												  "string get_LoadedMod()",
-												  asMETHOD(gui::MainScreenHelper, GetLoadedMod),
+												  "array<string>@ GetLoadedMods()",
+												  asMETHOD(gui::MainScreenHelper, GetLoadedMods),
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",
-												  "string SetActiveMod(string)",
-												  asMETHOD(gui::MainScreenHelper, SetActiveMod),
+												  "string SetModEnabled(string, bool)",
+												  asMETHOD(gui::MainScreenHelper, SetModEnabled),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "string DisableAllMods()",
+												  asMETHOD(gui::MainScreenHelper, DisableAllMods),
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",

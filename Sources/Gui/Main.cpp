@@ -23,8 +23,10 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <regex>
+#include <utility>
 #include <vector>
 
 #if (!defined(__APPLE__) && (__unix || __unix__)) || defined(__HAIKU__)
@@ -76,7 +78,9 @@ FILE __iob_func[3] = {*stdin, *stdout, *stderr};
 
 DEFINE_SPADES_SETTING(cl_showStartupWindow, "1");
 // Empty by default: archives in the per-user Resources directory are opt-in mods.
+// cl_activeMod is retained only to migrate configurations written by the single-mod manager.
 DEFINE_SPADES_SETTING(cl_activeMod, "");
+DEFINE_SPADES_SETTING(cl_activeMods, "");
 
 #ifdef WIN32
 // windows.h must be included before DbgHelp.h and shlobj.h.
@@ -290,7 +294,7 @@ namespace {
 
 namespace {
 	spades::DirectoryFileSystem *g_userResourceFileSystem = nullptr;
-	std::string g_loadedUserMod;
+	std::vector<std::string> g_loadedUserMods;
 
 	bool IsPackageArchiveName(const std::string &name) {
 		if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
@@ -350,17 +354,86 @@ namespace spades {
 		}
 	} // namespace
 
-	std::string GetActiveUserMod() { return std::string(cl_activeMod); }
+	namespace {
+		std::string SerializeUserMods(const std::vector<std::string> &mods) {
+			std::string value;
+			for (const std::string &name : mods) {
+				value += std::to_string(name.size());
+				value += ':';
+				value += name;
+			}
+			return value;
+		}
 
-	std::string GetLoadedUserMod() { return g_loadedUserMod; }
+		bool DeserializeUserMods(const std::string &value, std::vector<std::string> &mods) {
+			mods.clear();
+			size_t cursor = 0;
+			while (cursor < value.size()) {
+				size_t colon = value.find(':', cursor);
+				if (colon == std::string::npos || colon == cursor)
+					return false;
 
-	std::string SetActiveUserMod(const std::string &name) {
-		if (name.empty()) {
+				size_t length = 0;
+				for (size_t i = cursor; i < colon; ++i) {
+					unsigned char c = static_cast<unsigned char>(value[i]);
+					if (!std::isdigit(c))
+						return false;
+					size_t digit = static_cast<size_t>(c - '0');
+					if (length > (std::numeric_limits<size_t>::max() - digit) / 10)
+						return false;
+					length = length * 10 + digit;
+				}
+
+				cursor = colon + 1;
+				if (length == 0 || length > value.size() - cursor)
+					return false;
+				std::string name = value.substr(cursor, length);
+				if (std::find(mods.begin(), mods.end(), name) == mods.end())
+					mods.push_back(name);
+				cursor += length;
+			}
+			return true;
+		}
+
+		void PersistActiveUserMods(const std::vector<std::string> &mods) {
+			cl_activeMods = SerializeUserMods(mods);
 			cl_activeMod = std::string();
 			Settings::GetInstance()->Flush();
-			SPLog("User mods will be disabled on the next launch");
+		}
+	} // namespace
+
+	std::vector<std::string> GetActiveUserMods() {
+		std::string value = cl_activeMods;
+		if (!value.empty()) {
+			std::vector<std::string> mods;
+			if (DeserializeUserMods(value, mods))
+				return mods;
+			return std::vector<std::string>();
+		}
+
+		// Transparently import the old single archive setting. It is rewritten in the new
+		// length-prefixed format as soon as the selection changes or startup validates it.
+		std::string legacyMod = cl_activeMod;
+		if (!legacyMod.empty())
+			return std::vector<std::string>(1, legacyMod);
+		return std::vector<std::string>();
+	}
+
+	std::vector<std::string> GetLoadedUserMods() { return g_loadedUserMods; }
+
+	std::string SetUserModEnabled(const std::string &name, bool enabled) {
+		std::vector<std::string> mods = GetActiveUserMods();
+		auto existing = std::find(mods.begin(), mods.end(), name);
+
+		if (!enabled) {
+			if (existing != mods.end())
+				mods.erase(existing);
+			PersistActiveUserMods(mods);
+			SPLog("User mod disabled for next launch: %s", name.c_str());
 			return std::string();
 		}
+		if (existing != mods.end())
+			return std::string();
 
 		std::string error = ValidateUserModName(name);
 		if (!error.empty())
@@ -369,34 +442,68 @@ namespace spades {
 		// Construct the filesystem now to reject corrupt or unsupported archives, but do not
 		// change the live resource stack. Scripts, renderer/audio caches, and models can retain
 		// resources from the old stack; replacing it in-process creates mixed assets and can
-		// invalidate streams. Startup mounts the selection before any of those systems exist.
+		// invalidate streams. Startup mounts every selection before any of those systems exist.
 		try {
 			OpenUserModArchive(name);
 		} catch (const std::exception &ex) {
 			return Format("Unable to load mod '{0}': {1}", name, ex.what());
 		}
 
-		cl_activeMod = name;
-		Settings::GetInstance()->Flush();
-		SPLog("User mod selected for next launch: %s", name.c_str());
+		// The most recently enabled archive has highest priority. This makes collisions
+		// deterministic while still allowing disjoint archives to be combined.
+		mods.insert(mods.begin(), name);
+		PersistActiveUserMods(mods);
+		SPLog("User mod enabled for next launch at highest priority: %s", name.c_str());
 		return std::string();
 	}
 
-	std::string MountUserModForStartup(const std::string &name) {
-		std::string error = ValidateUserModName(name);
-		if (!error.empty())
-			return error;
+	std::string DisableAllUserMods() {
+		PersistActiveUserMods(std::vector<std::string>());
+		SPLog("All user mods will be disabled on the next launch");
+		return std::string();
+	}
 
-		try {
-			std::unique_ptr<ZipFileSystem> fileSystem = OpenUserModArchive(name);
-			FileManager::PrependFileSystem(fileSystem.get());
-			fileSystem.release();
-			g_loadedUserMod = name;
-			SPLog("User mod enabled during startup: %s", name.c_str());
-			return std::string();
-		} catch (const std::exception &ex) {
-			return Format("Unable to load mod '{0}': {1}", name, ex.what());
+	std::string MountUserModsForStartup(const std::vector<std::string> &names) {
+		using PendingMod = std::pair<std::string, std::unique_ptr<ZipFileSystem>>;
+		std::vector<PendingMod> pending;
+		std::vector<std::string> validNames;
+		std::string errors;
+
+		// Open and validate every archive before changing the resource search path.
+		for (const std::string &name : names) {
+			std::string error = ValidateUserModName(name);
+			if (error.empty()) {
+				try {
+					pending.emplace_back(name, OpenUserModArchive(name));
+					validNames.push_back(name);
+				} catch (const std::exception &ex) {
+					error = Format("Unable to open archive: {0}", ex.what());
+				}
+			}
+			if (!error.empty()) {
+				if (!errors.empty())
+					errors += "\n";
+				errors += Format("{0}: {1}", name, error);
+			}
 		}
+
+		// validNames is highest-to-lowest priority. Prepending in reverse preserves that
+		// order ahead of the built-in resources, so the newest selection wins path conflicts.
+		for (size_t i = pending.size(); i > 0; --i) {
+			FileManager::PrependFileSystem(pending[i - 1].second.get());
+			pending[i - 1].second.release();
+		}
+		g_loadedUserMods = validNames;
+		for (size_t i = 0; i < validNames.size(); ++i) {
+			SPLog("User mod enabled during startup (priority %u): %s",
+			      static_cast<unsigned int>(i + 1), validNames[i].c_str());
+		}
+
+		// Drop missing/corrupt packages without disabling the other valid selections, and
+		// complete migration from the legacy cl_activeMod setting after validation.
+		if (validNames != names || !std::string(cl_activeMod).empty())
+			PersistActiveUserMods(validNames);
+		return errors;
 	}
 
 	void StartClient(const spades::ServerAddress &addr) {
@@ -686,7 +793,7 @@ int main(int argc, char **argv) {
 		}
 
 		// Search application resources for packaged data. Archives directly inside the user
-		// Resources directory are mods and stay unmounted unless cl_activeMod selects one.
+		// Resources directory are mods and stay unmounted unless cl_activeMods selects them.
 		{
 			std::vector<spades::IFileSystem *> fss;
 			std::vector<spades::IFileSystem *> fssImportant;
@@ -755,15 +862,16 @@ int main(int argc, char **argv) {
 				spades::FileManager::PrependFileSystem(fssImportant[i]);
 			}
 
-			std::string requestedMod = cl_activeMod;
-			if (!requestedMod.empty()) {
-				std::string error = spades::MountUserModForStartup(requestedMod);
-				if (!error.empty()) {
-					SPLog("Failed to enable configured user mod '%s': %s", requestedMod.c_str(),
-					      error.c_str());
-					// Do not retry an absent or damaged package on every launch.
-					spades::SetActiveUserMod(std::string());
-				}
+			std::vector<std::string> requestedMods = spades::GetActiveUserMods();
+			if (!requestedMods.empty()) {
+				std::string errors = spades::MountUserModsForStartup(requestedMods);
+				if (!errors.empty())
+					SPLog("Some configured user mods could not be enabled:\n%s", errors.c_str());
+			} else if (!std::string(cl_activeMods).empty()) {
+				// A non-empty value that decodes to no entries is malformed. Repair it so the
+				// application does not repeatedly retry an invalid configuration.
+				SPLog("Discarding malformed cl_activeMods setting");
+				spades::DisableAllUserMods();
 			}
 		}
 		pumpEvents();

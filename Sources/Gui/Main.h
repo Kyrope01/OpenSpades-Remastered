@@ -30,12 +30,14 @@ namespace spades {
 
 	/** Returns supported package archives directly inside the user resource directory. */
 	std::vector<std::string> GetAvailableUserMods();
-	/** Returns the mod selected for the next launch, or an empty string. */
-	std::string GetActiveUserMod();
-	/** Returns the user mod loaded during this process's startup, or an empty string. */
-	std::string GetLoadedUserMod();
-	/** Validates and persists a mod selection, or disables mods when name is empty. */
-	std::string SetActiveUserMod(const std::string &name);
+	/** Returns enabled mods for the next launch, ordered from highest priority to lowest. */
+	std::vector<std::string> GetActiveUserMods();
+	/** Returns mods mounted during this process's startup in resource override order. */
+	std::vector<std::string> GetLoadedUserMods();
+	/** Validates and enables/disables one mod for the next launch. */
+	std::string SetUserModEnabled(const std::string &name, bool enabled);
+	/** Disables every user mod for the next launch. */
+	std::string DisableAllUserMods();
 	/** Requests a clean process relaunch after the current main-screen runner closes. */
 	void RequestApplicationRestart();
 
