@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include <Client/IGameMapListener.h>
 #include <Client/IRenderer.h>
 #include <Core/Math.h>
@@ -48,12 +50,16 @@ namespace spades {
 
 			IGLDevice::UInteger squareVertexBuffer;
 
-			struct ChunkRenderInfo {
-				bool rendered;
-				float distance;
-			};
 			GLMapChunk **chunks;
-			ChunkRenderInfo *chunkInfos;
+
+			struct VisibleChunk {
+				GLMapChunk *chunk;
+				float offsetX, offsetY;
+				AABB3 bounds;
+			};
+			std::vector<VisibleChunk> visibleChunks[2];
+			std::vector<int> activeColumns;
+			std::vector<int> activeColumnPositions;
 
 			client::GameMap *gameMap;
 
@@ -69,11 +75,11 @@ namespace spades {
 			}
 
 			void RealizeChunks(Vector3 eye);
-
-			void DrawColumnDepth(int cx, int cy, int cz, Vector3 eye);
-			void DrawColumnSunlight(int cx, int cy, int cz, Vector3 eye);
-			void DrawColumnDLight(int cx, int cy, int cz, Vector3 eye,
-			                      const std::vector<GLDynamicLight> &lights);
+			void SetColumnRealized(int columnIndex, bool realized);
+			void BuildVisibleChunkLists(Vector3 eye);
+			void AppendVisibleColumn(int cx, int cy, int cz, Vector3 eye, bool mirror,
+			                         std::vector<VisibleChunk> &output);
+			const std::vector<VisibleChunk> &GetVisibleChunks() const;
 
 			void RenderBackface();
 
@@ -90,7 +96,7 @@ namespace spades {
 			void Realize();
 			void Prerender();
 			void RenderSunlightPass();
-			void RenderDynamicLightPass(std::vector<GLDynamicLight> lights);
+			void RenderDynamicLightPass(const std::vector<GLDynamicLight> &lights);
 		};
 	}
 }

@@ -296,29 +296,35 @@ namespace spades {
 
 		currentStream = NULL;
 
-		if (unzGoToFirstFile(zip) != UNZ_OK) {
-			SPRaise("There was a problem while seeking the zip file to the first file.");
+		try {
+			if (unzGoToFirstFile(zip) != UNZ_OK) {
+				SPRaise("There was a problem while seeking the zip file to the first file.");
+			}
+
+			// create list of files
+			do {
+				char buf[513];
+				buf[512] = 0;
+				unzGetCurrentFileInfo(zip, nullptr, buf, 512, nullptr, 0, nullptr, 0);
+
+				for (char *ptr = buf; *ptr; ptr++) {
+					if (*ptr == '\\')
+						*ptr = '/';
+					else
+						*ptr = tolower(*ptr);
+				}
+
+				unz_file_pos pos;
+				if (unzGetFilePos(zip, &pos) != UNZ_OK) {
+					SPRaise("unzGetFilePos failed");
+				}
+				files.insert(std::make_pair(buf, pos));
+			} while (unzGoToNextFile(zip) == UNZ_OK);
+		} catch (...) {
+			unzClose(zip);
+			zip = nullptr;
+			throw;
 		}
-
-		// create list of files
-		do {
-			char buf[513];
-			buf[512] = 0;
-			unzGetCurrentFileInfo(zip, nullptr, buf, 512, nullptr, 0, nullptr, 0);
-
-			for (char *ptr = buf; *ptr; ptr++) {
-				if (*ptr == '\\')
-					*ptr = '/';
-				else
-					*ptr = tolower(*ptr);
-			}
-
-			unz_file_pos pos;
-			if (unzGetFilePos(zip, &pos) != UNZ_OK) {
-				SPRaise("unzGetFilePos failed");
-			}
-			files.insert(std::make_pair(buf, pos));
-		} while (unzGoToNextFile(zip) == UNZ_OK);
 	}
 
 	ZipFileSystem::~ZipFileSystem() {
@@ -327,7 +333,10 @@ namespace spades {
 			currentStream->ForceCloseUnzipFile();
 		}
 
-		unzClose(zip);
+		if (zip)
+			unzClose(zip);
+		if (autoClose)
+			delete baseStream;
 	}
 
 	IStream *ZipFileSystem::OpenForReading(const char *fn) {

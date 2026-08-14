@@ -166,6 +166,12 @@ namespace spades {
 
             void ScrollToTop() { scrollBar.ScrollTo(0.0); }
 
+            /** Scrolls a category heading (or any row) into view. */
+            void ScrollToRow(int row) {
+                scrollBar.ScrollTo(double(Clamp(row, 0, MaxTopRowIndex)));
+                Layout();
+            }
+
             void ScrollToEnd() { scrollBar.ScrollTo(scrollBar.MaxValue); }
         }
 

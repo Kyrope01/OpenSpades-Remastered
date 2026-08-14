@@ -32,9 +32,11 @@ namespace spades {
 		      dynamicLightRadius("dynamicLightRadius"),
 		      dynamicLightRadiusInversed("dynamicLightRadiusInversed"),
 		      dynamicLightSpotMatrix("dynamicLightSpotMatrix"),
-		      dynamicLightProjectionTexture("dynamicLightProjectionTexture")
+		      dynamicLightProjectionTexture("dynamicLightProjectionTexture"),
+		      dynamicLightIsLinear("dynamicLightIsLinear"),
+		      dynamicLightLinearDirection("dynamicLightLinearDirection"),
+		      dynamicLightLinearLength("dynamicLightLinearLength") {
 
-		{
 			lastRenderer = NULL;
 		}
 
@@ -67,6 +69,9 @@ namespace spades {
 			dynamicLightRadiusInversed(program);
 			dynamicLightSpotMatrix(program);
 			dynamicLightProjectionTexture(program);
+			dynamicLightIsLinear(program);
+			dynamicLightLinearDirection(program);
+			dynamicLightLinearLength(program);
 
 			dynamicLightOrigin.SetValue(param.origin.x, param.origin.y, param.origin.z);
 			dynamicLightColor.SetValue(param.color.x, param.color.y, param.color.z);
@@ -86,7 +91,7 @@ namespace spades {
 				                     IGLDevice::ClampToEdge);
 				device->TexParamater(IGLDevice::Texture2D, IGLDevice::TextureWrapT,
 				                     IGLDevice::ClampToEdge);
-
+				dynamicLightIsLinear.SetValue(0);
 			} else {
 				device->ActiveTexture(texStage);
 				whiteImage->Bind(IGLDevice::Texture2D);
@@ -97,6 +102,17 @@ namespace spades {
 				// UV is in a valid range so the fragments are not discarded.
 				dynamicLightSpotMatrix.SetValue(Matrix4::Translate(0.5, 0.5, 0.0) *
 				                                Matrix4::Scale(0.0));
+
+				if (param.type == client::DynamicLightTypeLinear) {
+					Vector3 direction = param.point2 - param.origin;
+					float length = direction.GetLength();
+					direction = direction.Normalize();
+					dynamicLightLinearDirection.SetValue(direction.x, direction.y, direction.z);
+					dynamicLightLinearLength.SetValue(length);
+					dynamicLightIsLinear.SetValue(1);
+				} else {
+					dynamicLightIsLinear.SetValue(0);
+				}
 			}
 
 			device->ActiveTexture(texStage);

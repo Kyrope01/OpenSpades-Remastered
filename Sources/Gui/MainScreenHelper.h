@@ -104,6 +104,13 @@ namespace spades {
 			std::string ConnectServer(std::string hostname, int protocolVersion);
 			std::string GetPendingErrorMessage();
 
+			CScriptArray *GetMods();
+			CScriptArray *GetActiveMods();
+			CScriptArray *GetLoadedMods();
+			std::string SetModEnabled(std::string name, bool enabled);
+			std::string DisableAllMods();
+			void RestartForModChange();
+
 			std::string GetCredits();
 
 			PackageUpdateManager& GetPackageUpdateManager();

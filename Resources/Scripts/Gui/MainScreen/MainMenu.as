@@ -18,309 +18,835 @@
 
  */
 
-#include "CreateProfileScreen.as"
 #include "ServerList.as"
+#include "ModList.as"
+#include "../Preferences.as"
+#include "../UIFramework/DropDownList.as"
 
 namespace spades {
 
-    class RefreshButton : spades::ui::SimpleButton {
-        RefreshButton(spades::ui::UIManager @manager) { super(manager); }
-        void Render() {
-            SimpleButton::Render();
-
-            Renderer @renderer = Manager.Renderer;
-            Vector2 pos = ScreenPosition;
-            Vector2 size = Size;
-            Image @img = renderer.RegisterImage("Gfx/UI/Refresh.png");
-            renderer.DrawImage(img, pos + (size - Vector2(16.f, 16.f)) * 0.5f);
-        }
-    }
-
-    class ProtocolButton : spades::ui::SimpleButton {
-        ProtocolButton(spades::ui::UIManager @manager) {
-            super(manager);
-            Toggle = true;
-        }
-    }
-
+    // These helpers are shared by the startup configuration filter and console completion.
+    // Keep their original global names so those separately included GUI scripts can resolve them.
     uint8 ToLower(uint8 c) {
-        if (c >= uint8(0x41) and c <= uint8(0x5a)) {
+        if (c >= uint8(0x41) and c <= uint8(0x5a))
             return uint8(c - 0x41 + 0x61);
-        } else {
-            return c;
-        }
+        return c;
     }
+
     bool StringContainsCaseInsensitive(string text, string pattern) {
-        for (int i = text.length - 1; i >= 0; i--)
+        for (int i = int(text.length) - 1; i >= 0; i--)
             text[i] = ToLower(text[i]);
-        for (int i = pattern.length - 1; i >= 0; i--)
+        for (int i = int(pattern.length) - 1; i >= 0; i--)
             pattern[i] = ToLower(pattern[i]);
         return text.findFirst(pattern) >= 0;
     }
 
+    /** Compact button backed by the UI framework's modal drop-down list. */
+    class MainScreenDropDownButton : spades::ui::SimpleButton {
+        private string[] items;
+        private int index = 0;
+        spades::ui::EventHandler @Changed;
+
+        MainScreenDropDownButton(spades::ui::UIManager @manager) {
+            super(manager);
+            Alignment = Vector2(0.f, 0.5f);
+        }
+
+        void SetItems(string[] values) {
+            items = values;
+            Index = 0;
+        }
+
+        int Index {
+            get { return index; }
+            set {
+                if (items.length == 0) {
+                    index = 0;
+                    Caption = "";
+                    return;
+                }
+                index = Clamp(value, 0, int(items.length) - 1);
+                Caption = items[index];
+            }
+        }
+
+        void Render() {
+            Renderer @renderer = Manager.Renderer;
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
+            if ((Pressed && Hover) || Toggled)
+                renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.20f);
+            else if (Hover)
+                renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.12f);
+            else
+                renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.07f);
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
+
+            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, Hover ? 0.10f : 0.05f);
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, 1.f, size.y));
+            renderer.DrawImage(white, AABB2(pos.x + size.x - 1.f, pos.y, 1.f, size.y));
+
+            float textAreaWidth = Max(1.f, size.x - 28.f);
+            Vector2 textSize = Font.Measure(Caption);
+            float scale = textSize.x > textAreaWidth ? textAreaWidth / textSize.x : 1.f;
+            Vector2 scaledSize = textSize * scale;
+            Font.DrawShadow(Caption,
+                            pos + Vector2(5.f, (size.y - scaledSize.y) * 0.5f), scale,
+                            Vector4(1.f, 1.f, 1.f, 1.f), Vector4(0.f, 0.f, 0.f, 0.4f));
+
+            Image @arrow = renderer.RegisterImage("Gfx/UI/ScrollArrow.png");
+            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.9f);
+            float arrowY = pos.y + (size.y + 16.f) * 0.5f;
+            renderer.DrawImage(arrow, AABB2(pos.x + size.x - 19.f, arrowY, 16.f, -16.f));
+        }
+
+        void OnActivated() {
+            ButtonBase::OnActivated();
+            spades::ui::ShowDropDownList(this, items,
+                                         spades::ui::DropDownListHandler(this.ItemSelected));
+        }
+
+        private void ItemSelected(int newIndex) {
+            if (newIndex < 0)
+                return;
+            bool changed = newIndex != index;
+            Index = newIndex;
+            if (changed && Changed !is null)
+                Changed(this);
+        }
+    }
+
+    /** Dark, thin-bordered panel used by the main menu layout. */
+    class MainScreenPanel : spades::ui::UIElement {
+        Vector4 FillColor = Vector4(0.018f, 0.018f, 0.018f, 0.82f);
+        Vector4 BorderColor = Vector4(0.76f, 0.76f, 0.76f, 0.42f);
+
+        MainScreenPanel(spades::ui::UIManager @manager) { super(manager); }
+
+        void Render() {
+            Renderer @renderer = Manager.Renderer;
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
+
+            renderer.ColorNP = FillColor;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
+            renderer.ColorNP = BorderColor;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, 1.f, size.y));
+            renderer.DrawImage(white, AABB2(pos.x + size.x - 1.f, pos.y, 1.f, size.y));
+        }
+    }
+
+    /** Flat menu button matching the narrow KyroSpades-style navigation rail. */
+    class MainScreenNavigationButton : spades::ui::Button {
+        bool IsExitButton = false;
+
+        MainScreenNavigationButton(spades::ui::UIManager @manager) {
+            super(manager);
+            Alignment = Vector2(0.5f, 0.5f);
+        }
+
+        void Render() {
+            Renderer @renderer = Manager.Renderer;
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
+
+            Vector4 fill = Vector4(0.36f, 0.36f, 0.36f, 0.72f);
+            Vector4 edge = Vector4(0.85f, 0.85f, 0.85f, 0.25f);
+            Vector4 text = Vector4(1.f, 1.f, 1.f, 1.f);
+            if (IsExitButton) {
+                fill = Vector4(0.28f, 0.28f, 0.28f, 0.78f);
+                edge = Vector4(0.72f, 0.72f, 0.72f, 0.38f);
+            }
+            if (!IsEnabled) {
+                fill *= Vector4(0.55f, 0.55f, 0.55f, 0.62f);
+                text = Vector4(0.68f, 0.68f, 0.68f, 0.72f);
+            } else if (Toggled || (Pressed && Hover)) {
+                fill += Vector4(0.18f, 0.18f, 0.18f, 0.08f);
+                edge = Vector4(1.f, 1.f, 1.f, 0.48f);
+            } else if (Hover) {
+                fill += Vector4(0.11f, 0.11f, 0.11f, 0.07f);
+            }
+
+            renderer.ColorNP = fill;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
+            renderer.ColorNP = edge;
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, 1.f, size.y));
+            renderer.DrawImage(white, AABB2(pos.x + size.x - 1.f, pos.y, 1.f, size.y));
+
+            Vector2 textSize = Font.Measure(Caption);
+            Font.DrawShadow(Caption, pos + (size - textSize) * 0.5f, 1.f, text,
+                            Vector4(0.f, 0.f, 0.f, 0.55f));
+        }
+    }
+
+    /** Standard button styling with a measured caption that always fits its current bounds. */
+    class MainScreenFittedButton : spades::ui::Button {
+        MainScreenFittedButton(spades::ui::UIManager @manager) { super(manager); }
+
+        void Render() {
+            Renderer @renderer = Manager.Renderer;
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            Image @image = renderer.RegisterImage("Gfx/UI/Button.png");
+
+            Vector4 color = Vector4(0.2f, 0.2f, 0.2f, 0.5f);
+            if (Toggled || (Pressed && Hover))
+                color = Vector4(0.7f, 0.7f, 0.7f, 0.9f);
+            else if (Hover)
+                color = Vector4(0.4f, 0.4f, 0.4f, 0.7f);
+            if (!IsEnabled)
+                color.w *= 0.5f;
+            renderer.ColorNP = color;
+            DrawSliceImage(renderer, image, pos.x, pos.y, size.x, size.y, 12.f);
+
+            Vector2 textSize = Font.Measure(Caption);
+            float scale = 1.f;
+            float availableWidth = Max(1.f, size.x - 16.f);
+            if (textSize.x > availableWidth)
+                scale = availableWidth / textSize.x;
+            Vector2 scaledTextSize = textSize * scale;
+            Vector2 textPosition = pos + (size - scaledTextSize) * 0.5f;
+            Vector4 textColor = Vector4(1.f, 1.f, 1.f, IsEnabled ? 1.f : 0.5f);
+            Font.DrawShadow(Caption, textPosition, scale, textColor,
+                            Vector4(0.f, 0.f, 0.f, IsEnabled ? 0.4f : 0.1f));
+        }
+    }
+
     class MainScreenMainMenu : spades::ui::UIElement {
-
         MainScreenUI @ui;
-        MainScreenHelper @helper;
-        spades::ui::Field @addressField;
 
-        spades::ui::Button @protocol3Button;
-        spades::ui::Button @protocol4Button;
+        private MainScreenPanel @navigationPanel;
+        private MainScreenPanel @browserPanel;
 
-        spades::ui::Button @filterProtocol3Button;
-        spades::ui::Button @filterProtocol4Button;
-        spades::ui::Button @filterEmptyButton;
-        spades::ui::Button @filterFullButton;
-        spades::ui::Field @filterField;
+        private MainScreenNavigationButton @serversButton;
+        private MainScreenNavigationButton @modsButton;
+        private MainScreenNavigationButton @settingsButton;
+        private MainScreenNavigationButton @controlsButton;
+        private MainScreenNavigationButton @creditsButton;
+        private MainScreenNavigationButton @exitButton;
 
-        spades::ui::ListView @serverList;
-        MainScreenServerListLoadingView @loadingView;
-        MainScreenServerListErrorView @errorView;
-        bool loading = false, loaded = false;
+        private spades::ui::Field @quickConnectField;
+        private spades::ui::Button @connectButton;
+        private spades::ui::Button @localButton;
+        private spades::ui::Button @refreshButton;
+        private spades::ui::Button @protocol75Button;
+        private spades::ui::Button @protocol76Button;
+
+        private MainScreenFittedButton @serverListSourceButton;
+        private spades::ui::Field @serverFilterField;
+        private MainScreenDropDownButton @filterPlayersButton;
+        private MainScreenDropDownButton @filterVersionButton;
+
+        private ServerListHeader @serverListPlayersHeader;
+        private ServerListHeader @serverListNameHeader;
+        private ServerListHeader @serverListMapHeader;
+        private ServerListHeader @serverListModeHeader;
+        private ServerListHeader @serverListPingHeader;
+
+        private spades::ui::ListView @serverListView;
+        private MainScreenServerListLoadingView @serverListLoadingView;
+        private MainScreenServerListErrorView @serverListErrorView;
+        private MainScreenServerItem @selectedServer;
+
+        private spades::ui::Label @modsTitle;
+        private spades::ui::Label @modsHelp;
+        private spades::ui::Label @modsApplyHelp;
+        private spades::ui::Label @modsStatus;
+        private spades::ui::Label @modsEmptyLabel;
+        private spades::ui::ListView @modsListView;
+        private spades::ui::Button @disableModsButton;
+        private spades::ui::Button @refreshModsButton;
+        private bool modsPageVisible = false;
+
+        private bool serverListLoaded = false;
+        private bool serverListLoading = false;
+        private bool serverListSuccess = false;
+        private string lastServerFilter = "";
+
+        private int sortIndex = 1;
+        private bool sortDescending = true;
+        private int serverListSource = 0;
 
         private ConfigItem cg_protocolVersion("cg_protocolVersion", "3");
         private ConfigItem cg_lastQuickConnectHost("cg_lastQuickConnectHost", "127.0.0.1");
         private ConfigItem cg_serverlistSort("cg_serverlistSort", "16385");
+        private ConfigItem cg_serverListSource("cg_serverListSource", "0");
+        private ConfigItem cl_serverListUrl(
+            "cl_serverListUrl", "http://services.buildandshoot.com/serverlist.json");
 
         MainScreenMainMenu(MainScreenUI @ui) {
             super(ui.manager);
             @this.ui = ui;
-            @this.helper = ui.helper;
 
-            float contentsWidth = 750.f;
-            float contentsLeft = (Manager.Renderer.ScreenWidth - contentsWidth) * 0.5f;
-            float footerPos = Manager.Renderer.ScreenHeight - 50.f;
-            {
-                spades::ui::Button button(Manager);
-                button.Caption = _Tr("MainScreen", "Connect");
-                button.Bounds = AABB2(contentsLeft + contentsWidth - 150.f, 200.f, 150.f, 30.f);
-                @button.Activated = spades::ui::EventHandler(this.OnConnectPressed);
-                AddChild(button);
+            int savedSort = cg_serverlistSort.IntValue;
+            sortIndex = savedSort & 0xfff;
+            if (sortIndex < 0 || sortIndex > 4)
+                sortIndex = 1;
+            sortDescending = (savedSort & 0x4000) != 0;
+            serverListSource = cg_serverListSource.IntValue == 1 ? 1 : 0;
+            ApplyServerListSource();
+
+            @navigationPanel = MainScreenPanel(Manager);
+            AddChild(navigationPanel);
+            @browserPanel = MainScreenPanel(Manager);
+            AddChild(browserPanel);
+
+            @serversButton = MakeNavigationButton(_Tr("MainScreen", "Servers"));
+            serversButton.Toggle = true;
+            serversButton.Toggled = true;
+            @serversButton.Activated = spades::ui::EventHandler(this.ServersButtonPressed);
+
+            @modsButton = MakeNavigationButton(_Tr("MainScreen", "Mods"));
+            modsButton.Toggle = true;
+            @modsButton.Activated = spades::ui::EventHandler(this.ModsButtonPressed);
+
+            @settingsButton = MakeNavigationButton(_Tr("MainScreen", "Settings"));
+            @settingsButton.Activated = spades::ui::EventHandler(this.SettingsButtonPressed);
+            @controlsButton = MakeNavigationButton(_Tr("MainScreen", "Controls"));
+            @controlsButton.Activated = spades::ui::EventHandler(this.ControlsButtonPressed);
+
+            @creditsButton = MakeNavigationButton(_Tr("MainScreen", "Credits"));
+            @creditsButton.Activated = spades::ui::EventHandler(this.CreditsButtonPressed);
+            @exitButton = MakeNavigationButton(_Tr("MainScreen", "Exit"));
+            exitButton.IsExitButton = true;
+            @exitButton.Activated = spades::ui::EventHandler(this.ExitButtonPressed);
+
+            @quickConnectField = spades::ui::Field(Manager);
+            quickConnectField.Placeholder = _Tr("MainScreen", "Server address (aos://...)");
+            quickConnectField.Text = cg_lastQuickConnectHost.StringValue;
+            @quickConnectField.Changed = spades::ui::EventHandler(this.QuickConnectChanged);
+            AddChild(quickConnectField);
+
+            @protocol75Button = spades::ui::Button(Manager);
+            protocol75Button.Caption = "0.75";
+            protocol75Button.Toggle = true;
+            protocol75Button.Toggled = cg_protocolVersion.IntValue == 3;
+            @protocol75Button.Activated = spades::ui::EventHandler(this.ProtocolButtonPressed);
+            AddChild(protocol75Button);
+            @protocol76Button = spades::ui::Button(Manager);
+            protocol76Button.Caption = "0.76";
+            protocol76Button.Toggle = true;
+            protocol76Button.Toggled = cg_protocolVersion.IntValue != 3;
+            @protocol76Button.Activated = spades::ui::EventHandler(this.ProtocolButtonPressed);
+            AddChild(protocol76Button);
+
+            @connectButton = spades::ui::Button(Manager);
+            connectButton.Caption = _Tr("MainScreen", "Join");
+            connectButton.Enable = quickConnectField.Text.length > 0;
+            @connectButton.Activated = spades::ui::EventHandler(this.ConnectButtonPressed);
+            AddChild(connectButton);
+            @localButton = spades::ui::Button(Manager);
+            localButton.Caption = _Tr("MainScreen", "Local");
+            @localButton.Activated = spades::ui::EventHandler(this.LocalButtonPressed);
+            AddChild(localButton);
+            @refreshButton = spades::ui::Button(Manager);
+            refreshButton.Caption = _Tr("MainScreen", "Refresh");
+            @refreshButton.Activated = spades::ui::EventHandler(this.RefreshButtonPressed);
+            AddChild(refreshButton);
+
+            @serverListSourceButton = MainScreenFittedButton(Manager);
+            serverListSourceButton.Caption = GetServerListSourceCaption();
+            @serverListSourceButton.Activated =
+                spades::ui::EventHandler(this.ServerListSourceButtonPressed);
+            AddChild(serverListSourceButton);
+
+            @serverFilterField = spades::ui::Field(Manager);
+            serverFilterField.Placeholder = _Tr("MainScreen", "Search servers");
+            @serverFilterField.Changed = spades::ui::EventHandler(this.FilterChanged);
+            AddChild(serverFilterField);
+
+            @filterPlayersButton = MainScreenDropDownButton(Manager);
+            filterPlayersButton.SetItems(
+                array<string> = {_Tr("MainScreen", "Players: Any"),
+                                 _Tr("MainScreen", "Players: Not empty"),
+                                 _Tr("MainScreen", "Players: Not full"),
+                                 _Tr("MainScreen", "Players: Not empty/full")});
+            @filterPlayersButton.Changed = spades::ui::EventHandler(this.FilterChanged);
+            AddChild(filterPlayersButton);
+
+            @filterVersionButton = MainScreenDropDownButton(Manager);
+            filterVersionButton.SetItems(array<string> = {_Tr("MainScreen", "Version: Any"),
+                                                           "0.75", "0.76"});
+            @filterVersionButton.Changed = spades::ui::EventHandler(this.FilterChanged);
+            AddChild(filterVersionButton);
+
+            @serverListPlayersHeader = MakeHeader(_Tr("MainScreen", "Players"),
+                                                  spades::ui::EventHandler(this.SortServerListByPlayers));
+            @serverListNameHeader = MakeHeader(_Tr("MainScreen", "Name"),
+                                               spades::ui::EventHandler(this.SortServerListByName));
+            @serverListMapHeader = MakeHeader(_Tr("MainScreen", "Map"),
+                                              spades::ui::EventHandler(this.SortServerListByMap));
+            @serverListModeHeader = MakeHeader(_Tr("MainScreen", "Mode"),
+                                               spades::ui::EventHandler(this.SortServerListByMode));
+            @serverListPingHeader = MakeHeader(_Tr("MainScreen", "Ping"),
+                                               spades::ui::EventHandler(this.SortServerListByPing));
+
+            @serverListView = spades::ui::ListView(Manager);
+            serverListView.RowHeight = 24.f;
+            AddChild(serverListView);
+            @serverListLoadingView = MainScreenServerListLoadingView(Manager);
+            AddChild(serverListLoadingView);
+            @serverListErrorView = MainScreenServerListErrorView(Manager);
+            serverListErrorView.Visible = false;
+            AddChild(serverListErrorView);
+
+            @modsTitle = spades::ui::Label(Manager);
+            modsTitle.Text = _Tr("MainScreen", "Installed Mods");
+            modsTitle.TextScale = 1.2f;
+            modsTitle.TextColor = Vector4(1.f, 1.f, 1.f, 1.f);
+            modsTitle.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsTitle);
+
+            @modsHelp = spades::ui::Label(Manager);
+            modsHelp.Text = _Tr("MainScreen", "Double-click to toggle .pak, .zip, or .pzk mods; multiple may be enabled.");
+            modsHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
+            modsHelp.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsHelp);
+
+            @modsApplyHelp = spades::ui::Label(Manager);
+            modsApplyHelp.Text =
+                _Tr("MainScreen", "Latest enabled mod wins file conflicts. Changes restart OpenSpades safely.");
+            modsApplyHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
+            modsApplyHelp.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsApplyHelp);
+
+            @modsStatus = spades::ui::Label(Manager);
+            modsStatus.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsStatus);
+
+            @modsListView = spades::ui::ListView(Manager);
+            modsListView.RowHeight = 32.f;
+            AddChild(modsListView);
+
+            @modsEmptyLabel = spades::ui::Label(Manager);
+            modsEmptyLabel.Text = _Tr("MainScreen", "No mod archives were found in your Resources directory.");
+            modsEmptyLabel.TextColor = Vector4(0.72f, 0.72f, 0.72f, 1.f);
+            modsEmptyLabel.Alignment = Vector2(0.5f, 0.5f);
+            AddChild(modsEmptyLabel);
+
+            @disableModsButton = spades::ui::Button(Manager);
+            disableModsButton.Caption = _Tr("MainScreen", "Disable All Mods");
+            @disableModsButton.Activated = spades::ui::EventHandler(this.DisableModsButtonPressed);
+            AddChild(disableModsButton);
+
+            @refreshModsButton = spades::ui::Button(Manager);
+            refreshModsButton.Caption = _Tr("MainScreen", "Refresh");
+            @refreshModsButton.Activated = spades::ui::EventHandler(this.RefreshModsButtonPressed);
+            AddChild(refreshModsButton);
+
+            UpdatePageVisibility();
+
+            // MainScreenUI starts the query after assigning this menu's initial bounds. Setting
+            // the empty model while the list still has zero height would leave its scroll range
+            // and page size at zero during ScrollBar.Layout().
+        }
+
+        private MainScreenNavigationButton @MakeNavigationButton(string caption) {
+            MainScreenNavigationButton button(Manager);
+            button.Caption = caption;
+            AddChild(button);
+            return button;
+        }
+
+        private ServerListHeader @MakeHeader(string text, spades::ui::EventHandler @handler) {
+            ServerListHeader header(Manager);
+            header.Text = text;
+            @header.Activated = handler;
+            AddChild(header);
+            return header;
+        }
+
+        private void UpdatePageVisibility() {
+            bool showServers = !modsPageVisible;
+            spades::ui::UIElement @[] serverElements = {
+                quickConnectField, protocol75Button, protocol76Button, connectButton, localButton,
+                refreshButton, serverListSourceButton, serverFilterField, filterPlayersButton,
+                filterVersionButton, serverListPlayersHeader, serverListNameHeader,
+                serverListMapHeader, serverListModeHeader, serverListPingHeader, serverListView,
+                serverListLoadingView, serverListErrorView
+            };
+            for (uint i = 0; i < serverElements.length; i++)
+                serverElements[i].Visible = showServers;
+            serverListView.Visible = showServers && serverListLoaded && serverListSuccess;
+            serverListLoadingView.Visible = showServers && serverListLoading;
+            serverListErrorView.Visible = showServers && serverListLoaded && !serverListSuccess;
+
+            spades::ui::UIElement @[] modElements = {
+                modsTitle, modsHelp, modsApplyHelp, modsStatus, modsListView, modsEmptyLabel,
+                disableModsButton, refreshModsButton
+            };
+            for (uint i = 0; i < modElements.length; i++)
+                modElements[i].Visible = modsPageVisible;
+
+            if (modsPageVisible)
+                modsEmptyLabel.Visible = modsListView.Model.NumRows == 0;
+            serversButton.Toggled = showServers;
+            modsButton.Toggled = modsPageVisible;
+        }
+
+        private bool ModListsEqual(string[] @a, string[] @b) {
+            if (a.length != b.length)
+                return false;
+            for (uint i = 0; i < a.length; i++) {
+                if (a[i] != b[i])
+                    return false;
             }
-            {
-                @addressField = spades::ui::Field(Manager);
-                addressField.Bounds = AABB2(contentsLeft, 200, contentsWidth - 240.f, 30.f);
-                addressField.Placeholder = _Tr("MainScreen", "Quick Connect");
-                addressField.Text = cg_lastQuickConnectHost.StringValue;
-                @addressField.Changed = spades::ui::EventHandler(this.OnAddressChanged);
-                AddChild(addressField);
+            return true;
+        }
+
+        private void RefreshMods() {
+            string[] @mods = ui.helper.GetMods();
+            string[] @selectedMods = ui.helper.GetActiveMods();
+            string[] @loadedMods = ui.helper.GetLoadedMods();
+            if (mods is null)
+                @mods = array<string>();
+            if (selectedMods is null)
+                @selectedMods = array<string>();
+            if (loadedMods is null)
+                @loadedMods = array<string>();
+            ModListModel model(Manager, mods, selectedMods, loadedMods);
+            @model.ItemDoubleClicked = ModListItemEventHandler(this.ModListItemDoubleClicked);
+            @modsListView.Model = model;
+
+            disableModsButton.Enable = selectedMods.length > 0 || loadedMods.length > 0;
+            if (selectedMods.length > 0 && ModListsEqual(selectedMods, loadedMods)) {
+                int count = int(selectedMods.length);
+                modsStatus.Text = _TrN("MainScreen", "{0} mod enabled.", "{0} mods enabled.",
+                                       count, ToString(count));
+                modsStatus.TextColor = Vector4(1.f, 0.88f, 0.18f, 1.f);
+            } else if (selectedMods.length > 0) {
+                int count = int(selectedMods.length);
+                modsStatus.Text = _TrN("MainScreen", "{0} mod selected - restart required",
+                                       "{0} mods selected - restart required", count,
+                                       ToString(count));
+                modsStatus.TextColor = Vector4(1.f, 0.72f, 0.16f, 1.f);
+            } else if (loadedMods.length > 0) {
+                modsStatus.Text = _Tr("MainScreen", "Restart required to disable all mods.");
+                modsStatus.TextColor = Vector4(1.f, 0.72f, 0.16f, 1.f);
+            } else {
+                modsStatus.Text = _Tr("MainScreen", "No mod is enabled.");
+                modsStatus.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
             }
-            {
-                @protocol3Button = ProtocolButton(Manager);
-                protocol3Button.Bounds =
-                    AABB2(contentsLeft + contentsWidth - 240.f + 6.f, 200, 40.f, 30.f);
-                protocol3Button.Caption = _Tr("MainScreen", "0.75");
-                @protocol3Button.Activated = spades::ui::EventHandler(this.OnProtocol3Pressed);
-                protocol3Button.Toggle = true;
-                protocol3Button.Toggled = cg_protocolVersion.IntValue == 3;
-                AddChild(protocol3Button);
+            modsEmptyLabel.Visible = modsPageVisible && mods.length == 0;
+        }
+
+        private void ModListItemDoubleClicked(ModListModel @sender, string name) {
+            bool enable = !sender.IsSelected(name);
+            string error = ui.helper.SetModEnabled(name, enable);
+            if (error.length > 0) {
+                string message = enable ? _Tr("MainScreen", "Failed to enable mod")
+                                        : _Tr("MainScreen", "Failed to disable mod");
+                AlertScreen alert(this, message + ":\n\n" + error);
+                alert.Run();
+            } else {
+                ui.helper.RestartForModChange();
+                return;
             }
-            {
-                @protocol4Button = ProtocolButton(Manager);
-                protocol4Button.Bounds =
-                    AABB2(contentsLeft + contentsWidth - 200.f + 6.f, 200, 40.f, 30.f);
-                protocol4Button.Caption = _Tr("MainScreen", "0.76");
-                @protocol4Button.Activated = spades::ui::EventHandler(this.OnProtocol4Pressed);
-                protocol4Button.Toggle = true;
-                protocol4Button.Toggled = cg_protocolVersion.IntValue == 4;
-                AddChild(protocol4Button);
+            RefreshMods();
+        }
+
+        private string GetServerListSourceCaption() {
+            if (serverListSource == 0)
+                return _Tr("MainScreen", "Serverlist: Master");
+            return _Tr("MainScreen", "Serverlist: checkpoint.aos.coffee");
+        }
+
+        private void ApplyServerListSource() {
+            cg_serverListSource = serverListSource;
+            if (serverListSource == 0)
+                cl_serverListUrl = "http://services.buildandshoot.com/serverlist.json";
+            else
+                cl_serverListUrl = "http://checkpoint.aos.coffee/serverlist.json";
+        }
+
+        private void UpdateServerListSourceCaption(int count) {
+            string caption = GetServerListSourceCaption();
+            if (count >= 0)
+                caption += " (" + ToString(count) + ")";
+            serverListSourceButton.Caption = caption;
+        }
+
+        void OnResized() {
+            float margin = 6.f;
+            float gap = 8.f;
+            float navigationWidth = Clamp(Size.x * 0.205f, 168.f, 194.f);
+            float browserX = margin + navigationWidth + gap;
+            float browserWidth = Max(360.f, Size.x - browserX - margin);
+            float fullHeight = Max(360.f, Size.y - margin * 2.f);
+
+            navigationPanel.Bounds = AABB2(margin, margin, navigationWidth, fullHeight);
+            browserPanel.Bounds = AABB2(browserX, margin, browserWidth, fullHeight);
+
+            float navInset = 5.f;
+            float navY = margin + navInset;
+            float navButtonHeight = Clamp(Size.y * 0.050f, 25.f, 30.f);
+            float navGap = 4.f;
+            float navButtonWidth = navigationWidth - navInset * 2.f;
+            spades::ui::UIElement @[] navButtons = {
+                serversButton, modsButton, settingsButton, controlsButton, creditsButton, exitButton
+            };
+            for (uint i = 0; i < navButtons.length; i++) {
+                navButtons[i].Bounds =
+                    AABB2(margin + navInset, navY, navButtonWidth, navButtonHeight);
+                navY += navButtonHeight + navGap;
             }
-            {
-                spades::ui::Button button(Manager);
-                button.Caption = _Tr("MainScreen", "Quit");
-                button.Bounds = AABB2(contentsLeft + contentsWidth - 100.f, footerPos, 100.f, 30.f);
-                @button.Activated = spades::ui::EventHandler(this.OnQuitPressed);
-                AddChild(button);
+
+            float contentInset = 4.f;
+            float contentX = browserX + contentInset;
+            float contentWidth = browserWidth - contentInset * 2.f;
+
+            // The server browser begins at the top of the content panel. The old showcase/news
+            // strip was decorative and needlessly reduced the number of visible servers.
+            float toolbarY = margin + contentInset;
+            float toolbarHeight = 30.f;
+            float toolbarGap = 4.f;
+            // Scale every action before sacrificing the address field. At the minimum supported
+            // panel width (352 px), these values still fit on one row without overlap.
+            float protocolWidth = Clamp(contentWidth * 0.11f, 42.f, 54.f);
+            float joinWidth = Clamp(contentWidth * 0.14f, 54.f, 76.f);
+            float localWidth = Clamp(contentWidth * 0.14f, 54.f, 76.f);
+            float refreshWidth = Clamp(contentWidth * 0.18f, 68.f, 90.f);
+            float quickWidth = contentWidth - protocolWidth * 2.f - joinWidth - localWidth -
+                               refreshWidth - toolbarGap * 5.f;
+            float x = contentX;
+            quickConnectField.Bounds = AABB2(x, toolbarY, quickWidth, toolbarHeight);
+            x += quickWidth + toolbarGap;
+            protocol75Button.Bounds = AABB2(x, toolbarY, protocolWidth, toolbarHeight);
+            x += protocolWidth + toolbarGap;
+            protocol76Button.Bounds = AABB2(x, toolbarY, protocolWidth, toolbarHeight);
+            x += protocolWidth + toolbarGap;
+            connectButton.Bounds = AABB2(x, toolbarY, joinWidth, toolbarHeight);
+            x += joinWidth + toolbarGap;
+            localButton.Bounds = AABB2(x, toolbarY, localWidth, toolbarHeight);
+            refreshButton.Bounds =
+                AABB2(contentX + contentWidth - refreshWidth, toolbarY, refreshWidth, toolbarHeight);
+
+            float filterY = toolbarY + toolbarHeight + 5.f;
+            float filterHeight = 27.f;
+            float sourceWidth = Clamp(contentWidth * 0.30f, 125.f, 230.f);
+            float versionWidth = Clamp(contentWidth * 0.20f, 75.f, 98.f);
+            float playersWidth = Clamp(contentWidth * 0.27f, 105.f, 148.f);
+            float searchWidth = contentWidth - sourceWidth - playersWidth - versionWidth - 9.f;
+            serverListSourceButton.Bounds = AABB2(contentX, filterY, sourceWidth, filterHeight);
+            serverFilterField.Bounds =
+                AABB2(contentX + sourceWidth + 3.f, filterY, searchWidth, filterHeight);
+            filterPlayersButton.Bounds = AABB2(contentX + contentWidth - playersWidth -
+                                                   versionWidth - 3.f,
+                                               filterY, playersWidth, filterHeight);
+            filterVersionButton.Bounds = AABB2(contentX + contentWidth - versionWidth, filterY,
+                                               versionWidth, filterHeight);
+
+            float headerY = filterY + filterHeight + 4.f;
+            float headerHeight = 25.f;
+            float columnWidth = contentWidth - serverListView.ScrollBarWidth;
+            float playersColumnWidth = ServerListPlayersColumnWidth(columnWidth);
+            float nameColumnWidth = ServerListNameColumnWidth(columnWidth);
+            float mapColumnWidth = ServerListMapColumnWidth(columnWidth);
+            float modeColumnWidth = ServerListModeColumnWidth(columnWidth);
+            float pingColumnWidth = ServerListPingColumnWidth(columnWidth);
+            float nameX = playersColumnWidth;
+            float mapX = nameX + nameColumnWidth;
+            float modeX = mapX + mapColumnWidth;
+            float pingX = modeX + modeColumnWidth;
+            serverListPlayersHeader.Bounds =
+                AABB2(contentX, headerY, playersColumnWidth, headerHeight);
+            serverListNameHeader.Bounds =
+                AABB2(contentX + nameX, headerY, nameColumnWidth, headerHeight);
+            serverListMapHeader.Bounds =
+                AABB2(contentX + mapX, headerY, mapColumnWidth, headerHeight);
+            serverListModeHeader.Bounds =
+                AABB2(contentX + modeX, headerY, modeColumnWidth, headerHeight);
+            serverListPingHeader.Bounds =
+                AABB2(contentX + pingX, headerY, pingColumnWidth, headerHeight);
+
+            float listY = headerY + headerHeight;
+            float listHeight = margin + fullHeight - contentInset - listY;
+            serverListView.Bounds = AABB2(contentX, listY, contentWidth, listHeight);
+            serverListLoadingView.Bounds = serverListView.Bounds;
+            serverListErrorView.Bounds = serverListView.Bounds;
+
+            float modsX = contentX + 8.f;
+            float modsWidth = contentWidth - 16.f;
+            float modsTop = margin + contentInset + 4.f;
+            modsTitle.Bounds = AABB2(modsX, modsTop, modsWidth, 28.f);
+            modsHelp.Bounds = AABB2(modsX, modsTop + 29.f, modsWidth, 21.f);
+            modsApplyHelp.Bounds = AABB2(modsX, modsTop + 50.f, modsWidth, 21.f);
+            modsStatus.Bounds = AABB2(modsX, modsTop + 72.f, modsWidth, 26.f);
+            float modsButtonHeight = 30.f;
+            float modsBottom = margin + fullHeight - contentInset - modsButtonHeight;
+            float modsListY = modsTop + 102.f;
+            modsListView.Bounds =
+                AABB2(modsX, modsListY, modsWidth, Max(80.f, modsBottom - modsListY - 7.f));
+            modsEmptyLabel.Bounds = modsListView.Bounds;
+            float modsButtonWidth = Clamp(modsWidth * 0.24f, 105.f, 150.f);
+            disableModsButton.Bounds =
+                AABB2(modsX, modsBottom, modsButtonWidth, modsButtonHeight);
+            refreshModsButton.Bounds = AABB2(modsX + modsWidth - modsButtonWidth, modsBottom,
+                                              modsButtonWidth, modsButtonHeight);
+
+            spades::ui::UIElement::OnResized();
+        }
+
+        private int ConnectProtocol {
+            get { return protocol75Button.Toggled ? 3 : 4; }
+        }
+
+        private void ProtocolButtonPressed(spades::ui::UIElement @sender) {
+            protocol75Button.Toggled = sender is protocol75Button;
+            protocol76Button.Toggled = sender is protocol76Button;
+            cg_protocolVersion = ConnectProtocol;
+        }
+
+        private void QuickConnectChanged(spades::ui::UIElement @sender) {
+            cg_lastQuickConnectHost = quickConnectField.Text;
+            connectButton.Enable = quickConnectField.Text.length > 0;
+        }
+
+        private void ConnectButtonPressed(spades::ui::UIElement @sender) {
+            if (quickConnectField.Text.length == 0)
+                return;
+            cg_lastQuickConnectHost = quickConnectField.Text;
+            string result = ui.helper.ConnectServer(quickConnectField.Text, ConnectProtocol);
+            if (result.length > 0) {
+                AlertScreen al(this, _Tr("MainScreen", "Connection failed") + ":\n\n" + result);
+                al.Run();
             }
-            {
-                spades::ui::Button button(Manager);
-                button.Caption = _Tr("MainScreen", "Credits");
-                button.Bounds = AABB2(contentsLeft + contentsWidth - 202.f, footerPos, 100.f, 30.f);
-                @button.Activated = spades::ui::EventHandler(this.OnCreditsPressed);
-                AddChild(button);
+        }
+
+        private void LocalButtonPressed(spades::ui::UIElement @sender) {
+            string result = ui.helper.ConnectServer("127.0.0.1", ConnectProtocol);
+            if (result.length > 0) {
+                AlertScreen al(this, _Tr("MainScreen", "Connection failed") + ":\n\n" + result);
+                al.Run();
             }
-            {
-                spades::ui::Button button(Manager);
-                button.Caption = _Tr("MainScreen", "Setup");
-                button.Bounds = AABB2(contentsLeft + contentsWidth - 304.f, footerPos, 100.f, 30.f);
-                @button.Activated = spades::ui::EventHandler(this.OnSetupPressed);
-                AddChild(button);
+        }
+
+        private void ServersButtonPressed(spades::ui::UIElement @sender) {
+            modsPageVisible = false;
+            UpdatePageVisibility();
+            if (!serverListLoaded && !serverListLoading)
+                LoadServerList();
+        }
+
+        private void ModsButtonPressed(spades::ui::UIElement @sender) {
+            modsPageVisible = true;
+            RefreshMods();
+            UpdatePageVisibility();
+        }
+
+        private void DisableModsButtonPressed(spades::ui::UIElement @sender) {
+            string error = ui.helper.DisableAllMods();
+            if (error.length > 0) {
+                AlertScreen alert(this, _Tr("MainScreen", "Failed to disable mods") + ":\n\n" + error);
+                alert.Run();
+            } else {
+                ui.helper.RestartForModChange();
+                return;
             }
-            {
-                RefreshButton button(Manager);
-                button.Bounds = AABB2(contentsLeft + contentsWidth - 364.f, footerPos, 30.f, 30.f);
-                @button.Activated = spades::ui::EventHandler(this.OnRefreshServerListPressed);
-                AddChild(button);
-            }
-            {
-                spades::ui::Label label(Manager);
-                label.Text = _Tr("MainScreen", "Filter");
-                label.Bounds = AABB2(contentsLeft, footerPos, 50.f, 30.f);
-                label.Alignment = Vector2(0.f, 0.5f);
-                AddChild(label);
-            }
-            {
-                @filterProtocol3Button = ProtocolButton(Manager);
-                filterProtocol3Button.Bounds = AABB2(contentsLeft + 50.f, footerPos, 40.f, 30.f);
-                filterProtocol3Button.Caption = _Tr("MainScreen", "0.75");
-                @filterProtocol3Button.Activated
-                = spades::ui::EventHandler(this.OnFilterProtocol3Pressed);
-                filterProtocol3Button.Toggle = true;
-                AddChild(filterProtocol3Button);
-            }
-            {
-                @filterProtocol4Button = ProtocolButton(Manager);
-                filterProtocol4Button.Bounds = AABB2(contentsLeft + 90.f, footerPos, 40.f, 30.f);
-                filterProtocol4Button.Caption = _Tr("MainScreen", "0.76");
-                @filterProtocol4Button.Activated
-                = spades::ui::EventHandler(this.OnFilterProtocol4Pressed);
-                filterProtocol4Button.Toggle = true;
-                AddChild(filterProtocol4Button);
-            }
-            {
-                @filterEmptyButton = ProtocolButton(Manager);
-                filterEmptyButton.Bounds = AABB2(contentsLeft + 135.f, footerPos, 50.f, 30.f);
-                filterEmptyButton.Caption = _Tr("MainScreen", "Empty");
-                @filterEmptyButton.Activated = spades::ui::EventHandler(this.OnFilterEmptyPressed);
-                filterEmptyButton.Toggle = true;
-                AddChild(filterEmptyButton);
-            }
-            {
-                @filterFullButton = ProtocolButton(Manager);
-                filterFullButton.Bounds = AABB2(contentsLeft + 185.f, footerPos, 70.f, 30.f);
-                filterFullButton.Caption = _Tr("MainScreen", "Not Full");
-                @filterFullButton.Activated = spades::ui::EventHandler(this.OnFilterFullPressed);
-                filterFullButton.Toggle = true;
-                AddChild(filterFullButton);
-            }
-            {
-                @filterField = spades::ui::Field(Manager);
-                filterField.Bounds = AABB2(contentsLeft + 260.f, footerPos, 120.f, 30.f);
-                filterField.Placeholder = _Tr("MainScreen", "Filter");
-                @filterField.Changed = spades::ui::EventHandler(this.OnFilterTextChanged);
-                AddChild(filterField);
-            }
-            {
-                @serverList = spades::ui::ListView(Manager);
-                serverList.Bounds = AABB2(contentsLeft, 270.f, contentsWidth, footerPos - 280.f);
-                AddChild(serverList);
-            }
-            {
-                ServerListHeader header(Manager);
-                header.Bounds = AABB2(contentsLeft + 2.f, 240.f, 300.f - 2.f, 30.f);
-                header.Text = _Tr("MainScreen", "Server Name");
-                @header.Activated = spades::ui::EventHandler(this.SortServerListByName);
-                AddChild(header);
-            }
-            {
-                ServerListHeader header(Manager);
-                header.Bounds = AABB2(contentsLeft + 300.f, 240.f, 100.f, 30.f);
-                header.Text = _Tr("MainScreen", "Players");
-                @header.Activated = spades::ui::EventHandler(this.SortServerListByNumPlayers);
-                AddChild(header);
-            }
-            {
-                ServerListHeader header(Manager);
-                header.Bounds = AABB2(contentsLeft + 400.f, 240.f, 150.f, 30.f);
-                header.Text = _Tr("MainScreen", "Map Name");
-                @header.Activated = spades::ui::EventHandler(this.SortServerListByMapName);
-                AddChild(header);
-            }
-            {
-                ServerListHeader header(Manager);
-                header.Bounds = AABB2(contentsLeft + 550.f, 240.f, 80.f, 30.f);
-                header.Text = _Tr("MainScreen", "Game Mode");
-                @header.Activated = spades::ui::EventHandler(this.SortServerListByGameMode);
-                AddChild(header);
-            }
-            {
-                ServerListHeader header(Manager);
-                header.Bounds = AABB2(contentsLeft + 630.f, 240.f, 50.f, 30.f);
-                header.Text = _Tr("MainScreen", "Ver.");
-                @header.Activated = spades::ui::EventHandler(this.SortServerListByProtocol);
-                AddChild(header);
-            }
-            {
-                ServerListHeader header(Manager);
-                header.Bounds = AABB2(contentsLeft + 680.f, 240.f, 50.f, 30.f);
-                header.Text = _Tr("MainScreen", "Loc.");
-                @header.Activated = spades::ui::EventHandler(this.SortServerListByCountry);
-                AddChild(header);
-            }
-            {
-                @loadingView = MainScreenServerListLoadingView(Manager);
-                loadingView.Bounds = AABB2(contentsLeft, 240.f, contentsWidth, 100.f);
-                loadingView.Visible = false;
-                AddChild(loadingView);
-            }
-            {
-                @errorView = MainScreenServerListErrorView(Manager);
-                errorView.Bounds = AABB2(contentsLeft, 240.f, contentsWidth, 100.f);
-                errorView.Visible = false;
-                AddChild(errorView);
-            }
+            RefreshMods();
+        }
+
+        private void RefreshModsButtonPressed(spades::ui::UIElement @sender) { RefreshMods(); }
+
+        private void RefreshButtonPressed(spades::ui::UIElement @sender) { LoadServerList(); }
+
+        private void ServerListSourceButtonPressed(spades::ui::UIElement @sender) {
+            if (serverListLoading)
+                return;
+            serverListSource = serverListSource == 0 ? 1 : 0;
+            ApplyServerListSource();
+            UpdateServerListSourceCaption(-1);
             LoadServerList();
         }
 
-        void LoadServerList() {
-            if (loading) {
-                return;
-            }
-            loaded = false;
-            loading = true;
-            @serverList.Model = spades::ui::ListViewModel(); // empty
-            errorView.Visible = false;
-            loadingView.Visible = true;
-            helper.StartQuery();
+        private void SettingsButtonPressed(spades::ui::UIElement @sender) {
+            PreferenceViewOptions options;
+            options.InitialTabIndex = 0;
+            PreferenceView view(this, options, ui.fontManager);
+            view.Run();
+        }
+
+        private void ControlsButtonPressed(spades::ui::UIElement @sender) {
+            PreferenceViewOptions options;
+            options.InitialTabIndex = 1;
+            PreferenceView view(this, options, ui.fontManager);
+            view.Run();
+        }
+
+        private void CreditsButtonPressed(spades::ui::UIElement @sender) {
+            AlertScreen credits(this, ui.helper.Credits,
+                                Min(500.f, Manager.Renderer.ScreenHeight - 100.f));
+            credits.Run();
+        }
+
+        private void ExitButtonPressed(spades::ui::UIElement @sender) {
+            // Preserve the original main-menu exit semantics: activate once to close the client.
+            ui.shouldExit = true;
         }
 
         void ServerListItemActivated(ServerListModel @sender, MainScreenServerItem @item) {
-            addressField.Text = item.Address;
-            cg_lastQuickConnectHost = addressField.Text;
+            @selectedServer = item;
+            quickConnectField.Text = item.Address;
+            cg_lastQuickConnectHost = item.Address;
+            connectButton.Enable = true;
             if (item.Protocol == "0.75") {
-                SetProtocolVersion(3);
+                protocol75Button.Toggled = true;
+                protocol76Button.Toggled = false;
+                cg_protocolVersion = 3;
             } else if (item.Protocol == "0.76") {
-                SetProtocolVersion(4);
+                protocol75Button.Toggled = false;
+                protocol76Button.Toggled = true;
+                cg_protocolVersion = 4;
             }
-            addressField.SelectAll();
+            quickConnectField.SelectAll();
         }
 
         void ServerListItemDoubleClicked(ServerListModel @sender, MainScreenServerItem @item) {
             ServerListItemActivated(sender, item);
-
-            // Double-click to connect
-            Connect();
+            ConnectButtonPressed(connectButton);
         }
 
         void ServerListItemRightClicked(ServerListModel @sender, MainScreenServerItem @item) {
-            helper.SetServerFavorite(item.Address, !item.Favorite);
+            // Favorite is exposed by the native server item as read-only. Persist the inverse
+            // through MainScreenHelper; the next model refresh obtains the updated value.
+            ui.helper.SetServerFavorite(item.Address, !item.Favorite);
             UpdateServerList();
         }
 
         private void SortServerListByPing(spades::ui::UIElement @sender) { SortServerList(0); }
-        private void SortServerListByNumPlayers(spades::ui::UIElement @sender) {
-            SortServerList(1);
-        }
+        private void SortServerListByPlayers(spades::ui::UIElement @sender) { SortServerList(1); }
         private void SortServerListByName(spades::ui::UIElement @sender) { SortServerList(2); }
-        private void SortServerListByMapName(spades::ui::UIElement @sender) { SortServerList(3); }
-        private void SortServerListByGameMode(spades::ui::UIElement @sender) { SortServerList(4); }
-        private void SortServerListByProtocol(spades::ui::UIElement @sender) { SortServerList(5); }
-        private void SortServerListByCountry(spades::ui::UIElement @sender) { SortServerList(6); }
+        private void SortServerListByMap(spades::ui::UIElement @sender) { SortServerList(3); }
+        private void SortServerListByMode(spades::ui::UIElement @sender) { SortServerList(4); }
 
-        private void SortServerList(int keyId) {
-            int sort = cg_serverlistSort.IntValue;
-            if (int(sort & 0xfff) == keyId) {
-                sort ^= int(0x4000);
-            } else {
-                sort = keyId;
+        private void SortServerList(int index) {
+            if (sortIndex == index)
+                sortDescending = !sortDescending;
+            else {
+                sortIndex = index;
+                sortDescending = false;
             }
-            cg_serverlistSort = sort;
+            cg_serverlistSort = sortIndex | (sortDescending ? 0x4000 : 0);
             UpdateServerList();
         }
 
+        private void FilterChanged(spades::ui::UIElement @sender) { UpdateServerList(); }
+
         private void UpdateServerList() {
-            string key = "";
-            switch (cg_serverlistSort.IntValue & 0xfff) {
+            if (!serverListLoaded || !serverListSuccess)
+                return;
+
+            string key;
+            switch (sortIndex) {
                 case 0: key = "Ping"; break;
                 case 1: key = "NumPlayers"; break;
                 case 2: key = "Name"; break;
@@ -329,169 +855,129 @@ namespace spades {
                 case 5: key = "Protocol"; break;
                 case 6: key = "Country"; break;
             }
-            MainScreenServerItem @[] @list =
-                helper.GetServerList(key, (cg_serverlistSort.IntValue & 0x4000) != 0);
-            if ((list is null)or(loading)) {
-                @serverList.Model = spades::ui::ListViewModel(); // empty
-                return;
-            }
+            MainScreenServerItem @[] @list = ui.helper.GetServerList(key, sortDescending);
+            if (list is null)
+                @list = array<spades::MainScreenServerItem @>();
 
-            // filter the server list
-            bool filterProtocol3 = filterProtocol3Button.Toggled;
-            bool filterProtocol4 = filterProtocol4Button.Toggled;
-            bool filterEmpty = filterEmptyButton.Toggled;
-            bool filterFull = filterFullButton.Toggled;
-            string filterText = filterField.Text;
+            string filter = serverFilterField.Text;
+            int filterPlayers = filterPlayersButton.Index;
+            int filterVersion = filterVersionButton.Index;
+
             MainScreenServerItem @[] @list2 = array<spades::MainScreenServerItem @>();
-            for (int i = 0, count = list.length; i < count; i++) {
+            for (uint i = 0; i < list.length; i++) {
                 MainScreenServerItem @item = list[i];
-                if (filterProtocol3 and(item.Protocol != "0.75")) {
-                    continue;
-                }
-                if (filterProtocol4 and(item.Protocol != "0.76")) {
-                    continue;
-                }
-                if (filterEmpty and(item.NumPlayers > 0)) {
-                    continue;
-                }
-                if (filterFull and(item.NumPlayers >= item.MaxPlayers)) {
-                    continue;
-                }
-                if (filterText.length > 0) {
-                    if (not(StringContainsCaseInsensitive(item.Name, filterText)
-                                or StringContainsCaseInsensitive(item.MapName, filterText)
-                                    or StringContainsCaseInsensitive(item.GameMode, filterText))) {
-                        continue;
-                    }
-                }
-                list2.insertLast(item);
+                bool good = true;
+                if (filterVersion == 1 && item.Protocol != "0.75")
+                    good = false;
+                if (filterVersion == 2 && item.Protocol != "0.76")
+                    good = false;
+                if (filterPlayers == 1 && item.NumPlayers == 0)
+                    good = false;
+                if (filterPlayers == 2 && item.NumPlayers >= item.MaxPlayers)
+                    good = false;
+                if (filterPlayers == 3 &&
+                    (item.NumPlayers == 0 || item.NumPlayers >= item.MaxPlayers))
+                    good = false;
+                if (filter.length > 0 &&
+                    !(StringContainsCaseInsensitive(item.Name, filter) ||
+                      StringContainsCaseInsensitive(item.MapName, filter) ||
+                      StringContainsCaseInsensitive(item.GameMode, filter)))
+                    good = false;
+                if (good)
+                    list2.insertLast(item);
             }
+            UpdateServerListSourceCaption(int(list2.length));
 
             ServerListModel model(Manager, list2);
-            @serverList.Model = model;
             @model.ItemActivated = ServerListItemEventHandler(this.ServerListItemActivated);
-            @model.ItemDoubleClicked = ServerListItemEventHandler(this.ServerListItemDoubleClicked);
+            @model.ItemDoubleClicked =
+                ServerListItemEventHandler(this.ServerListItemDoubleClicked);
             @model.ItemRightClicked = ServerListItemEventHandler(this.ServerListItemRightClicked);
-            serverList.ScrollToTop();
+            @serverListView.Model = model;
+            lastServerFilter = serverFilterField.Text;
         }
 
-        private void CheckServerList() {
-            if (helper.PollServerListState()) {
-                MainScreenServerItem @[] @list = helper.GetServerList("", false);
-                if (list is null or list.length == 0) {
-                    // failed.
-                    // FIXME: show error message?
-                    loaded = false;
-                    loading = false;
-                    errorView.Visible = true;
-                    loadingView.Visible = false;
-                    @serverList.Model = spades::ui::ListViewModel(); // empty
-                    return;
-                }
-                loading = false;
-                loaded = true;
-                errorView.Visible = false;
-                loadingView.Visible = false;
+        void LoadServerList() {
+            if (serverListLoading)
+                return;
+            ui.helper.StartQuery();
+            serverListLoaded = false;
+            serverListLoading = true;
+            serverListSuccess = false;
+            @serverListView.Model = spades::ui::ListViewModel();
+            serverListLoadingView.Visible = !modsPageVisible;
+            serverListErrorView.Visible = false;
+            serverListView.Visible = false;
+            serverListSourceButton.Enable = false;
+            UpdateServerListSourceCaption(-1);
+        }
+
+        void PollServerListState() {
+            if (!serverListLoading || serverListLoaded)
+                return;
+            if (!ui.helper.PollServerListState())
+                return;
+
+            @selectedServer = null;
+            serverListLoaded = true;
+            serverListLoading = false;
+            serverListSourceButton.Enable = true;
+            MainScreenServerItem @[] @list = ui.helper.GetServerList("", false);
+            if (list is null || list.length == 0) {
+                serverListSuccess = false;
+                serverListView.Visible = false;
+                serverListLoadingView.Visible = false;
+                serverListErrorView.Visible = !modsPageVisible;
+            } else {
+                serverListSuccess = true;
+                serverListView.Visible = !modsPageVisible;
+                serverListLoadingView.Visible = false;
+                serverListErrorView.Visible = false;
                 UpdateServerList();
             }
         }
 
-        private void OnAddressChanged(spades::ui::UIElement @sender) {
-            cg_lastQuickConnectHost = addressField.Text;
-        }
-
-        private void SetProtocolVersion(int ver) {
-            protocol3Button.Toggled = (ver == 3);
-            protocol4Button.Toggled = (ver == 4);
-            cg_protocolVersion = ver;
-        }
-
-        private void OnProtocol3Pressed(spades::ui::UIElement @sender) { SetProtocolVersion(3); }
-
-        private void OnProtocol4Pressed(spades::ui::UIElement @sender) { SetProtocolVersion(4); }
-
-        private void OnFilterProtocol3Pressed(spades::ui::UIElement @sender) {
-            filterProtocol4Button.Toggled = false;
-            UpdateServerList();
-        }
-        private void OnFilterProtocol4Pressed(spades::ui::UIElement @sender) {
-            filterProtocol3Button.Toggled = false;
-            UpdateServerList();
-        }
-        private void OnFilterFullPressed(spades::ui::UIElement @sender) {
-            filterEmptyButton.Toggled = false;
-            UpdateServerList();
-        }
-        private void OnFilterEmptyPressed(spades::ui::UIElement @sender) {
-            filterFullButton.Toggled = false;
-            UpdateServerList();
-        }
-        private void OnFilterTextChanged(spades::ui::UIElement @sender) { UpdateServerList(); }
-
-        private void OnRefreshServerListPressed(spades::ui::UIElement @sender) { LoadServerList(); }
-
-        private void OnQuitPressed(spades::ui::UIElement @sender) { ui.shouldExit = true; }
-
-        private void OnCreditsPressed(spades::ui::UIElement @sender) {
-            AlertScreen al(this, ui.helper.Credits,
-                           Min(500.f, Manager.Renderer.ScreenHeight - 100.f));
-            al.Run();
-        }
-
-        private void OnSetupPressed(spades::ui::UIElement @sender) {
-            PreferenceView al(this, PreferenceViewOptions(), ui.fontManager);
-            al.Run();
-        }
-
-        private void Connect() {
-            string msg = helper.ConnectServer(addressField.Text, cg_protocolVersion.IntValue);
-            if (msg.length > 0) {
-                // failde to initialize client.
-                AlertScreen al(this, msg);
-                al.Run();
-            }
-        }
-
-        private void OnConnectPressed(spades::ui::UIElement @sender) { Connect(); }
-
         void HotKey(string key) {
-            if (IsEnabled and key == "Enter") {
-                Connect();
-            } else if (IsEnabled and key == "Escape") {
-                ui.shouldExit = true;
-            } else {
+            if (IsEnabled && key == "Enter" && !modsPageVisible)
+                ConnectButtonPressed(connectButton);
+            else if (IsEnabled && key == "Escape")
+                ExitButtonPressed(exitButton);
+            else
                 UIElement::HotKey(key);
-            }
         }
 
         void Render() {
-            CheckServerList();
+            // UIElement has no per-frame update hook; the original menu also polled its async
+            // query from Render(). Keep polling here so the list can actually leave Loading.
+            PollServerListState();
+            if (serverListLoaded && serverListSuccess &&
+                lastServerFilter != serverFilterField.Text) {
+                UpdateServerList();
+            }
+
             UIElement::Render();
 
-            // check for client error message.
-            if (IsEnabled) {
-                string msg = helper.GetPendingErrorMessage();
-                if (msg.length > 0) {
-                    // try to maek the "disconnected" message more friendly.
-                    if (msg.findFirst("Disconnected:") >= 0) {
-                        int ind1 = msg.findFirst("Disconnected:");
-                        int ind2 = msg.findFirst("\n", ind1);
-                        if (ind2 < 0)
-                            ind2 = msg.length;
-                        ind1 += "Disconnected:".length;
-                        msg = msg.substr(ind1, ind2 - ind1);
-                        msg = _Tr(
-                            "MainScreen",
-                            "You were disconnected from the server because of the following reason:\n\n{0}",
-                            msg);
-                    }
+            if (!IsEnabled)
+                return;
+            string msg = ui.helper.GetPendingErrorMessage();
+            if (msg.length == 0)
+                return;
 
-                    // failed to connect.
-                    AlertScreen al(this, msg);
-                    al.Run();
-                }
+            if (msg.findFirst("Disconnected:") >= 0) {
+                int start = msg.findFirst("Disconnected:");
+                int finish = msg.findFirst("\n", start);
+                if (finish < 0)
+                    finish = int(msg.length);
+                start += int("Disconnected:".length);
+                msg = msg.substr(start, finish - start);
+                msg = _Tr("MainScreen",
+                          "You were disconnected from the server because of the following "
+                          "reason:\n\n{0}",
+                          msg);
             }
+
+            AlertScreen al(this, msg);
+            al.Run();
         }
     }
-
 }

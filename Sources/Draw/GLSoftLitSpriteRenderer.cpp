@@ -142,7 +142,17 @@ namespace spades {
 				for (size_t i = 0; i < sprites.size(); i++) {
 					Sprite &spr = sprites[i];
 
-					Vector3 v = dl.origin - spr.center;
+					Vector3 lightPosition = dl.origin;
+					if (dl.type == client::DynamicLightTypeLinear) {
+						Vector3 segment = dl.point2 - dl.origin;
+						float segmentLengthSq = segment.GetPoweredLength();
+						if (segmentLengthSq > 0.f) {
+							float t = Vector3::Dot(spr.center - dl.origin, segment) / segmentLengthSq;
+							t = std::min(1.f, std::max(0.f, t));
+							lightPosition += segment * t;
+						}
+					}
+					Vector3 v = lightPosition - spr.center;
 					float effectiveRadius = spr.radius + dl.radius;
 
 					if (v.GetChebyshevLength() > effectiveRadius)

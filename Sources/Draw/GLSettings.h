@@ -44,6 +44,7 @@ namespace spades {
 			TypedItemHandle<bool> r_depthPrepass        { *this, "r_depthPrepass" };
 			TypedItemHandle<bool> r_dlights             { *this, "r_dlights" };
 			TypedItemHandle<float> r_exposureValue      { *this, "r_exposureValue" };
+			TypedItemHandle<bool> r_filmicToneMapping   { *this, "r_filmicToneMapping" };
 			TypedItemHandle<bool> r_fogShadow           { *this, "r_fogShadow", ItemFlags::Latch };
 			TypedItemHandle<bool> r_fxaa                { *this, "r_fxaa" };
 			TypedItemHandle<bool> r_hdr                 { *this, "r_hdr", ItemFlags::Latch };

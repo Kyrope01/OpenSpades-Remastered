@@ -25,6 +25,7 @@
 #include <Core/Settings.h>
 #include <Core/Strings.h>
 
+#include "BloodMarks.h"
 #include "CTFGameMode.h"
 #include "Corpse.h"
 #include "GameMap.h"
@@ -150,8 +151,8 @@ namespace spades {
 
 			// Limit the range of cg_fov
 			// (note: comparsion with a NaN always results in false)
-			if (!((float)cg_fov < 90.0f)) {
-				cg_fov = 90.0f;
+			if (!((float)cg_fov < 110.0f)) {
+				cg_fov = 110.0f;
 			}
 			if (!((float)cg_fov > 45.0f)) {
 				cg_fov = 45.0f;
@@ -631,6 +632,9 @@ namespace spades {
 						ent->Render3D();
 					}
 				}
+
+				if (bloodMarks)
+					bloodMarks->Draw();
 
 				// Draw block cursor
 				if (p) {

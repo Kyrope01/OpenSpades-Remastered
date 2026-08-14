@@ -47,6 +47,15 @@ set_target_properties(OpenSpades PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BIN
 set_target_properties(OpenSpades PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set_target_properties(OpenSpades PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+if(OPENSPADES_IPO_SUPPORTED)
+	# Apply whole-program optimization across the executable and the bundled
+	# static libraries. Debug deliberately remains fast to rebuild and inspect.
+	set_target_properties(OpenSpades Angelscript Angelscript_addons PROPERTIES
+		INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
+		INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE
+		INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE)
+endif()
+
 if(APPLE OR WIN32)
 	# This value is reflected to the macOS application bundle's name, so use
 	# the correct capitalization.

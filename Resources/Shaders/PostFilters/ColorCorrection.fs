@@ -30,6 +30,7 @@ uniform vec3 tint;
 uniform float sharpening;
 uniform float sharpeningFinalGain;
 uniform float blurPixelShift;
+uniform float filmicToneMapping;
 
 vec3 acesToneMapping(vec3 x)
 {
@@ -68,10 +69,10 @@ void main() {
 		// global factors.
 		float enhancingFactor = sharpening;
 #if USE_HDR
-		// Now we take the derivative of `acesToneMapping` into consideration.
-		// Specifially, when `acesToneMapping` reduces the color contrast
-		// around the current pixel by N times, we compensate by scaling
-		// `enhancingFactor` by N.
+		// HDR rendering always passes through ACES tone mapping. Compensate for its
+		// derivative exactly as upstream OpenSpades does. Do not apply this to the
+		// optional LDR filmic curve: doing so can amplify the unsharp mask up to four
+		// times and creates visible halos around models, sprites, and terrain edges.
 		float localLuminance = dot(blurred.xyz, vec3(1. / 3.));
 		float localLuminanceLinear = clamp(localLuminance * localLuminance, 0.0, 1.0);
 		enhancingFactor *= acesToneMappingDiffRcp(localLuminanceLinear * 0.8);
@@ -81,7 +82,8 @@ void main() {
 		localLuminance = max(localLuminance, dot(gl_FragColor.xyz, vec3(1. / 3.)));
 		if (localLuminance > 1.0) {
 			localLuminance -= 1.0;
-			enhancingFactor *= 1.0 - (localLuminance + localLuminance * localLuminance) * 100.0;
+			enhancingFactor *=
+			  1.0 - (localLuminance + localLuminance * localLuminance) * 100.0;
 		}
 #endif
 
@@ -99,10 +101,20 @@ void main() {
 		//
 		//    r_sharp = 1 + localSharpening
 
-		// Sharpening is done by reversing the effect of the blur kernel.
-		// Clamp the lower bound to suppress the black edges around specular highlights.
+		// Sharpening is done by reversing the effect of the blur kernel. A plain
+		// unsharp mask overshoots on both sides of a high-contrast silhouette,
+		// producing the bright/dark object halos that sharpening is meant to avoid.
+		// Keep low-contrast detail enhancement, but smoothly reject an adjustment
+		// once it is large enough to become a visible outline. This uses the samples
+		// already fetched for the blur and therefore adds no texture lookups.
+		vec3 detail = gl_FragColor.xyz - blurred.xyz;
+		float detailMagnitude =
+		  max(max(abs(detail.x), abs(detail.y)), abs(detail.z)) * localSharpening;
+		float antiHalo = 1.0 - smoothstep(0.005, 0.03, detailMagnitude);
+
+		// Clamp the lower bound as a final safeguard for very dark highlights.
 		vec3 lowerBound = gl_FragColor.xyz * 0.6;
-		gl_FragColor.xyz += (gl_FragColor.xyz - blurred.xyz) * localSharpening;
+		gl_FragColor.xyz += detail * localSharpening * antiHalo;
 		gl_FragColor.xyz = max(gl_FragColor.xyz, lowerBound);
 	}
 
@@ -112,18 +124,18 @@ void main() {
 	vec3 gray = vec3(dot(gl_FragColor.xyz, vec3(1. / 3.)));
 	gl_FragColor.xyz = mix(gray, gl_FragColor.xyz, saturation);
 
-#if USE_HDR
-	gl_FragColor.xyz *= gl_FragColor.xyz; // linearize
-	gl_FragColor.xyz = acesToneMapping(gl_FragColor.xyz * 0.8);
-	gl_FragColor.xyz = sqrt(gl_FragColor.xyz); // delinearize
+	if (filmicToneMapping > 0.5) {
+		// Use a filmic ACES approximation in linear color space. Running this
+		// independently of USE_HDR also gives LDR rendering a smooth highlight
+		// shoulder instead of a hard clip.
+		gl_FragColor.xyz *= gl_FragColor.xyz; // linearize
+		gl_FragColor.xyz = acesToneMapping(gl_FragColor.xyz * 0.8);
+		gl_FragColor.xyz = sqrt(gl_FragColor.xyz); // delinearize
+	}
+
 	gl_FragColor.xyz = mix(gl_FragColor.xyz,
 						   smoothstep(0., 1., gl_FragColor.xyz),
 						   enhancement);
-#else
-	gl_FragColor.xyz = mix(gl_FragColor.xyz,
-						   smoothstep(0., 1., gl_FragColor.xyz),
-						   enhancement);
-#endif
 
 	gl_FragColor.w = 1.;
 

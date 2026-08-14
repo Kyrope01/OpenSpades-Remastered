@@ -19,12 +19,22 @@
  */
 
 #include <algorithm> //std::sort
+#include <cerrno>
+#include <cctype>
+#include <cstdio>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <regex>
+#include <utility>
+#include <vector>
 
 #if (!defined(__APPLE__) && (__unix || __unix__)) || defined(__HAIKU__)
 #include <sys/stat.h>
 #include <sys/types.h>
+#endif
+#ifndef WIN32
+#include <unistd.h>
 #endif
 
 #include <Imports/SDL.h>
@@ -67,6 +77,10 @@ FILE __iob_func[3] = {*stdin, *stdout, *stderr};
 #endif
 
 DEFINE_SPADES_SETTING(cl_showStartupWindow, "1");
+// Empty by default: archives in the per-user Resources directory are opt-in mods.
+// cl_activeMod is retained only to migrate configurations written by the single-mod manager.
+DEFINE_SPADES_SETTING(cl_activeMod, "");
+DEFINE_SPADES_SETTING(cl_activeMods, "");
 
 #ifdef WIN32
 // windows.h must be included before DbgHelp.h and shlobj.h.
@@ -184,6 +198,8 @@ namespace {
 
 	bool g_printVersion = false;
 	bool g_printHelp = false;
+	bool g_modRestartLaunch = false;
+	bool g_restartRequested = false;
 
 	void printHelp(char *binaryName) {
 		printf("usage: %s [server_address] [v=protocol_version] [-h|--help] [-v|--version] \n",
@@ -217,14 +233,278 @@ namespace {
 				g_printHelp = true;
 				return ++i;
 			}
+			if (!strcasecmp(a, "--mod-restart")) {
+				g_modRestartLaunch = true;
+				return ++i;
+			}
 		}
 
 		return 0;
 	}
+
+	bool RelaunchApplication(int argc, char **argv, std::string &error) {
+#ifdef WIN32
+		(void)argc;
+		(void)argv;
+		std::vector<wchar_t> executablePath(32768);
+		DWORD executablePathCapacity = static_cast<DWORD>(executablePath.size());
+		DWORD executablePathLength =
+		  GetModuleFileNameW(nullptr, executablePath.data(), executablePathCapacity);
+		if (executablePathLength == 0 || executablePathLength >= executablePathCapacity) {
+			error = spades::Format("GetModuleFileNameW failed with error {0}", GetLastError());
+			return false;
+		}
+
+		std::wstring commandLine(GetCommandLineW());
+		if (!g_modRestartLaunch)
+			commandLine += L" --mod-restart";
+
+		std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+		mutableCommandLine.push_back(L'\0');
+
+		STARTUPINFOW startupInfo = {};
+		startupInfo.cb = sizeof(startupInfo);
+		PROCESS_INFORMATION processInfo = {};
+		if (!CreateProcessW(executablePath.data(), mutableCommandLine.data(), nullptr, nullptr, FALSE,
+		                    0, nullptr, nullptr, &startupInfo, &processInfo)) {
+			error = spades::Format("CreateProcessW failed with error {0}", GetLastError());
+			return false;
+		}
+
+		CloseHandle(processInfo.hThread);
+		CloseHandle(processInfo.hProcess);
+		return true;
+#else
+		std::vector<char *> launchArguments;
+		launchArguments.reserve(static_cast<size_t>(argc) + 2);
+		for (int i = 0; i < argc; ++i)
+			launchArguments.push_back(argv[i]);
+		char restartArgument[] = "--mod-restart";
+		if (!g_modRestartLaunch)
+			launchArguments.push_back(restartArgument);
+		launchArguments.push_back(nullptr);
+
+		fflush(nullptr);
+		execvp(launchArguments[0], launchArguments.data());
+		error = spades::Format("execvp failed: {0}", std::string(std::strerror(errno)));
+		return false;
+#endif
+	}
 } // namespace
+
+namespace {
+	spades::DirectoryFileSystem *g_userResourceFileSystem = nullptr;
+	std::vector<std::string> g_loadedUserMods;
+
+	bool IsPackageArchiveName(const std::string &name) {
+		if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+			return false;
+		std::string lower = name;
+		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+		return lower.size() > 4 &&
+		       (lower.compare(lower.size() - 4, 4, ".pak") == 0 ||
+		        lower.compare(lower.size() - 4, 4, ".zip") == 0 ||
+		        lower.compare(lower.size() - 4, 4, ".pzk") == 0);
+	}
+}
 
 namespace spades {
 	std::string g_userResourceDirectory;
+
+	void RequestApplicationRestart() {
+		g_restartRequested = true;
+		SPLog("A clean restart was requested to apply the user mod selection");
+	}
+
+	std::vector<std::string> GetAvailableUserMods() {
+		std::vector<std::string> mods;
+		if (g_userResourceDirectory.empty())
+			return mods;
+
+		DirectoryFileSystem userFiles(g_userResourceDirectory, false);
+		for (const std::string &name : userFiles.EnumFiles("")) {
+			if (IsPackageArchiveName(name) && userFiles.FileExists(name.c_str()))
+				mods.push_back(name);
+		}
+		std::sort(mods.begin(), mods.end(), [](const std::string &a, const std::string &b) {
+			return std::lexicographical_compare(
+			  a.begin(), a.end(), b.begin(), b.end(), [](unsigned char x, unsigned char y) {
+				  return std::tolower(x) < std::tolower(y);
+			  });
+		});
+		return mods;
+	}
+
+	namespace {
+		std::string ValidateUserModName(const std::string &name) {
+			const std::vector<std::string> mods = GetAvailableUserMods();
+			if (std::find(mods.begin(), mods.end(), name) == mods.end())
+				return "The selected mod is no longer present in the user Resources directory.";
+			return std::string();
+		}
+
+		std::unique_ptr<ZipFileSystem> OpenUserModArchive(const std::string &name) {
+			DirectoryFileSystem userFiles(g_userResourceDirectory, false);
+			std::unique_ptr<IStream> stream(userFiles.OpenForReading(name.c_str()));
+			std::unique_ptr<ZipFileSystem> fileSystem(new ZipFileSystem(stream.get()));
+			stream.release(); // ZipFileSystem owns it after successful construction.
+			return fileSystem;
+		}
+	} // namespace
+
+	namespace {
+		std::string SerializeUserMods(const std::vector<std::string> &mods) {
+			std::string value;
+			for (const std::string &name : mods) {
+				value += std::to_string(name.size());
+				value += ':';
+				value += name;
+			}
+			return value;
+		}
+
+		bool DeserializeUserMods(const std::string &value, std::vector<std::string> &mods) {
+			mods.clear();
+			size_t cursor = 0;
+			while (cursor < value.size()) {
+				size_t colon = value.find(':', cursor);
+				if (colon == std::string::npos || colon == cursor)
+					return false;
+
+				size_t length = 0;
+				for (size_t i = cursor; i < colon; ++i) {
+					unsigned char c = static_cast<unsigned char>(value[i]);
+					if (!std::isdigit(c))
+						return false;
+					size_t digit = static_cast<size_t>(c - '0');
+					if (length > (std::numeric_limits<size_t>::max() - digit) / 10)
+						return false;
+					length = length * 10 + digit;
+				}
+
+				cursor = colon + 1;
+				if (length == 0 || length > value.size() - cursor)
+					return false;
+				std::string name = value.substr(cursor, length);
+				if (std::find(mods.begin(), mods.end(), name) == mods.end())
+					mods.push_back(name);
+				cursor += length;
+			}
+			return true;
+		}
+
+		void PersistActiveUserMods(const std::vector<std::string> &mods) {
+			cl_activeMods = SerializeUserMods(mods);
+			cl_activeMod = std::string();
+			Settings::GetInstance()->Flush();
+		}
+	} // namespace
+
+	std::vector<std::string> GetActiveUserMods() {
+		std::string value = cl_activeMods;
+		if (!value.empty()) {
+			std::vector<std::string> mods;
+			if (DeserializeUserMods(value, mods))
+				return mods;
+			return std::vector<std::string>();
+		}
+
+		// Transparently import the old single archive setting. It is rewritten in the new
+		// length-prefixed format as soon as the selection changes or startup validates it.
+		std::string legacyMod = cl_activeMod;
+		if (!legacyMod.empty())
+			return std::vector<std::string>(1, legacyMod);
+		return std::vector<std::string>();
+	}
+
+	std::vector<std::string> GetLoadedUserMods() { return g_loadedUserMods; }
+
+	std::string SetUserModEnabled(const std::string &name, bool enabled) {
+		std::vector<std::string> mods = GetActiveUserMods();
+		auto existing = std::find(mods.begin(), mods.end(), name);
+
+		if (!enabled) {
+			if (existing != mods.end())
+				mods.erase(existing);
+			PersistActiveUserMods(mods);
+			SPLog("User mod disabled for next launch: %s", name.c_str());
+			return std::string();
+		}
+		if (existing != mods.end())
+			return std::string();
+
+		std::string error = ValidateUserModName(name);
+		if (!error.empty())
+			return error;
+
+		// Construct the filesystem now to reject corrupt or unsupported archives, but do not
+		// change the live resource stack. Scripts, renderer/audio caches, and models can retain
+		// resources from the old stack; replacing it in-process creates mixed assets and can
+		// invalidate streams. Startup mounts every selection before any of those systems exist.
+		try {
+			OpenUserModArchive(name);
+		} catch (const std::exception &ex) {
+			return Format("Unable to load mod '{0}': {1}", name, ex.what());
+		}
+
+		// The most recently enabled archive has highest priority. This makes collisions
+		// deterministic while still allowing disjoint archives to be combined.
+		mods.insert(mods.begin(), name);
+		PersistActiveUserMods(mods);
+		SPLog("User mod enabled for next launch at highest priority: %s", name.c_str());
+		return std::string();
+	}
+
+	std::string DisableAllUserMods() {
+		PersistActiveUserMods(std::vector<std::string>());
+		SPLog("All user mods will be disabled on the next launch");
+		return std::string();
+	}
+
+	std::string MountUserModsForStartup(const std::vector<std::string> &names) {
+		using PendingMod = std::pair<std::string, std::unique_ptr<ZipFileSystem>>;
+		std::vector<PendingMod> pending;
+		std::vector<std::string> validNames;
+		std::string errors;
+
+		// Open and validate every archive before changing the resource search path.
+		for (const std::string &name : names) {
+			std::string error = ValidateUserModName(name);
+			if (error.empty()) {
+				try {
+					pending.emplace_back(name, OpenUserModArchive(name));
+					validNames.push_back(name);
+				} catch (const std::exception &ex) {
+					error = Format("Unable to open archive: {0}", ex.what());
+				}
+			}
+			if (!error.empty()) {
+				if (!errors.empty())
+					errors += "\n";
+				errors += Format("{0}: {1}", name, error);
+			}
+		}
+
+		// validNames is highest-to-lowest priority. Prepending in reverse preserves that
+		// order ahead of the built-in resources, so the newest selection wins path conflicts.
+		for (size_t i = pending.size(); i > 0; --i) {
+			FileManager::PrependFileSystem(pending[i - 1].second.get());
+			pending[i - 1].second.release();
+		}
+		g_loadedUserMods = validNames;
+		for (size_t i = 0; i < validNames.size(); ++i) {
+			SPLog("User mod enabled during startup (priority %u): %s",
+			      static_cast<unsigned int>(i + 1), validNames[i].c_str());
+		}
+
+		// Drop missing/corrupt packages without disabling the other valid selections, and
+		// complete migration from the legacy cl_activeMod setting after validation.
+		if (validNames != names || !std::string(cl_activeMod).empty())
+			PersistActiveUserMods(validNames);
+		return errors;
+	}
 
 	void StartClient(const spades::ServerAddress &addr) {
 		class ConcreteRunner : public spades::gui::Runner {
@@ -309,6 +589,7 @@ int main(int argc, char **argv) {
 	}
 
 	std::unique_ptr<spades::SplashWindow> splashWindow;
+	bool cleanShutdownCompleted = false;
 
 	try {
 
@@ -343,19 +624,19 @@ int main(int argc, char **argv) {
 		    (userAppDirAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
 			SPLog("UserResources found - switching to 'portable' mode");
 
-			spades::FileManager::AddFileSystem(
-			  new spades::DirectoryFileSystem(Utf8FromWString(userAppDir.c_str()), true));
-
 			spades::g_userResourceDirectory = Utf8FromWString(userAppDir.c_str());
+			g_userResourceFileSystem =
+			  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+			spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 		} else {
 			if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, buf))) {
 				std::wstring datadir = buf;
 				datadir += L"\\OpenSpades\\Resources";
 
 				spades::g_userResourceDirectory = Utf8FromWString(datadir.c_str());
-
-				spades::FileManager::AddFileSystem(
-				  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true));
+				g_userResourceFileSystem =
+				  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+				spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 			} else {
 				SPLog("SHGetFolderPathW failed.");
 			}
@@ -387,8 +668,9 @@ int main(int argc, char **argv) {
 		spades::g_userResourceDirectory =
 		  home + "/Library/Application Support/OpenSpades/Resources";
 
-		spades::FileManager::AddFileSystem(
-		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true));
+		g_userResourceFileSystem =
+		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+		spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 #else
 		std::string home = getenv("HOME");
 
@@ -402,7 +684,7 @@ int main(int argc, char **argv) {
 		if (getenv("XDG_DATA_HOME") == NULL) {
 			SPLog("XDG_DATA_HOME not defined. Assuming that XDG_DATA_HOME is ~/.local/share");
 		} else {
-			std::string xdg_data_home = getenv("XDG_DATA_HOME");
+			xdg_data_home = getenv("XDG_DATA_HOME");
 			SPLog("XDG_DATA_HOME is %s", xdg_data_home.c_str());
 		}
 
@@ -436,8 +718,9 @@ int main(int argc, char **argv) {
 
 		spades::g_userResourceDirectory = xdg_data_home + "/openspades/Resources";
 
-		spades::FileManager::AddFileSystem(
-		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true));
+		g_userResourceFileSystem =
+		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+		spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 
 #endif
 
@@ -509,12 +792,16 @@ int main(int argc, char **argv) {
 			        ex.what());
 		}
 
-		// search current file system for .pak files
+		// Search application resources for packaged data. Archives directly inside the user
+		// Resources directory are mods and stay unmounted unless cl_activeMods selects them.
 		{
 			std::vector<spades::IFileSystem *> fss;
 			std::vector<spades::IFileSystem *> fssImportant;
 
-			std::vector<std::string> files = spades::FileManager::EnumFiles("");
+			std::vector<std::string> files =
+			  g_userResourceFileSystem
+			    ? spades::FileManager::EnumFilesExcluding("", g_userResourceFileSystem)
+			    : spades::FileManager::EnumFiles("");
 
 			struct Comparator {
 				static int GetPakId(const std::string &str) {
@@ -541,20 +828,22 @@ int main(int argc, char **argv) {
 			for (size_t i = 0; i < files.size(); i++) {
 				std::string name = files[i];
 
-				// check extension
-				if (name.size() < 4 || (name.rfind(".pak") != name.size() - 4 &&
-				                        name.rfind(".zip") != name.size() - 4)) {
+				if (!IsPackageArchiveName(name)) {
 					SPLog("Ignored loose file: %s", name.c_str());
 					continue;
 				}
-
-				if (spades::FileManager::FileExists(name.c_str())) {
-					spades::IStream *stream = spades::FileManager::OpenForReading(name.c_str());
-					uLong crc = computeCrc32ForStream(stream);
+				{
+					std::unique_ptr<spades::IStream> stream(
+					  g_userResourceFileSystem
+					    ? spades::FileManager::OpenForReadingExcluding(name.c_str(),
+					                                                       g_userResourceFileSystem)
+					    : spades::FileManager::OpenForReading(name.c_str()));
+					uLong crc = computeCrc32ForStream(stream.get());
 
 					stream->SetPosition(0);
 
-					spades::ZipFileSystem *fs = new spades::ZipFileSystem(stream);
+					spades::ZipFileSystem *fs = new spades::ZipFileSystem(stream.get());
+					stream.release();
 					if (name[0] == '_' && false) { // last resort for #198
 						SPLog("Pak registered: %s: %08lx (marked as 'important')", name.c_str(),
 						      static_cast<unsigned long>(crc));
@@ -571,6 +860,18 @@ int main(int argc, char **argv) {
 			}
 			for (size_t i = 0; i < fssImportant.size(); i++) {
 				spades::FileManager::PrependFileSystem(fssImportant[i]);
+			}
+
+			std::vector<std::string> requestedMods = spades::GetActiveUserMods();
+			if (!requestedMods.empty()) {
+				std::string errors = spades::MountUserModsForStartup(requestedMods);
+				if (!errors.empty())
+					SPLog("Some configured user mods could not be enabled:\n%s", errors.c_str());
+			} else if (!std::string(cl_activeMods).empty()) {
+				// A non-empty value that decodes to no entries is malformed. Repair it so the
+				// application does not repeatedly retry an invalid configuration.
+				SPLog("Discarding malformed cl_activeMods setting");
+				spades::DisableAllUserMods();
 			}
 		}
 		pumpEvents();
@@ -593,17 +894,19 @@ int main(int argc, char **argv) {
 
 		SDL_InitSubSystem(SDL_INIT_VIDEO);
 
-		// we want to show splash window at least for some time...
+		// We normally keep the splash visible long enough to be readable. A mod restart has
+		// already shown the UI and should return to it as quickly as initialization allows.
 		pumpEvents();
 		auto ticks = SDL_GetTicks();
-		if (ticks < showSplashWindowTime + 1500) {
+		if (!g_modRestartLaunch && ticks < showSplashWindowTime + 1500) {
 			SDL_Delay(showSplashWindowTime + 1500 - ticks);
 		}
 		pumpEvents();
 
 		// everything is now ready!
 		if (!g_autoconnect) {
-			if (!((int)cl_showStartupWindow != 0 || splashWindow->IsStartupScreenRequested())) {
+			if (g_modRestartLaunch ||
+			    !((int)cl_showStartupWindow != 0 || splashWindow->IsStartupScreenRequested())) {
 				splashWindow.reset();
 
 				SPLog("Starting main screen");
@@ -623,7 +926,12 @@ int main(int argc, char **argv) {
 
 		spades::Settings::GetInstance()->Flush();
 
+		if (g_restartRequested) {
+			SPLog("Closing application resources before relaunching to apply the user mod");
+			spades::CloseLog();
+		}
 		spades::FileManager::Close();
+		cleanShutdownCompleted = true;
 	} catch (const spades::ExitRequestException &) {
 		// user changed his/her mind.
 	} catch (const std::exception &ex) {
@@ -647,6 +955,21 @@ int main(int argc, char **argv) {
 		                             nullptr)) {
 			// showing dialog failed.
 			// TODO: do appropriate action
+		}
+	}
+
+	if (g_restartRequested && cleanShutdownCompleted) {
+		std::string error;
+		if (!RelaunchApplication(argc, argv, error)) {
+			fprintf(stderr, "OpenSpades could not restart automatically: %s\n", error.c_str());
+			std::string message = spades::Format(
+			  "OpenSpades could not restart automatically. Please start it manually to apply "
+			  "the selected mod.\n\n{0}",
+			  error);
+			SDL_InitSubSystem(SDL_INIT_VIDEO);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenSpades Restart Failed",
+			                         message.c_str(), nullptr);
+			return 1;
 		}
 	}
 

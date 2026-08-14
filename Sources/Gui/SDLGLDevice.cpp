@@ -119,6 +119,7 @@ namespace spades {
 #endif
 
 		SDLGLDevice::SDLGLDevice(SDL_Window *s) : window(s) {
+			enabledStates.fill(-1);
 			SPLog("starting SDLGLDevice");
 
 			SDL_GetWindowSize(window, &w, &h);
@@ -138,6 +139,16 @@ namespace spades {
 			}
 #endif
 			SPLog("GLEW initialized");
+
+			GLint maxTextureUnits = 0;
+			glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &maxTextureUnits);
+			if (maxTextureUnits > 0)
+				textureBindings.resize(static_cast<size_t>(maxTextureUnits));
+
+			GLint maxVertexAttribs = 0;
+			glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxVertexAttribs);
+			if (maxVertexAttribs > 0)
+				vertexAttribArrayStates.resize(static_cast<size_t>(maxVertexAttribs), -1);
 
 			SPLog("--- OpenGL Renderer Info ---");
 			const char *ret;
@@ -184,6 +195,8 @@ namespace spades {
 
 			CheckExistence(glFrontFace);
 			glFrontFace(GL_CW);
+			frontFace = CW;
+			frontFaceValid = true;
 
 			if (r_ignoreGLErrors) {
 				SPLog("NOTICE: r_ignoreGLErrors is enabled. "
@@ -207,9 +220,18 @@ namespace spades {
 			CheckError();
 		}
 		void SDLGLDevice::Viewport(Integer x, Integer y, Sizei width, Sizei height) {
+			if (viewportValid && viewportX == x && viewportY == y && viewportWidth == width &&
+			    viewportHeight == height)
+				return;
+
 			CheckExistence(glViewport);
 			glViewport(x, y, width, height);
 			CheckError();
+			viewportX = x;
+			viewportY = y;
+			viewportWidth = width;
+			viewportHeight = height;
+			viewportValid = true;
 		}
 
 		void SDLGLDevice::ClearDepth(float v) {
@@ -267,45 +289,87 @@ namespace spades {
 		}
 
 		void SDLGLDevice::DepthMask(bool b) {
+			if (depthMaskValid && depthMask == b)
+				return;
+
 			CheckExistence(glDepthMask);
 			glDepthMask(b ? GL_TRUE : GL_FALSE);
 			CheckError();
+			depthMask = b;
+			depthMaskValid = true;
 		}
 
 		void SDLGLDevice::ColorMask(bool r, bool g, bool b, bool a) {
+			unsigned int mask = (r ? 1U : 0U) | (g ? 2U : 0U) | (b ? 4U : 0U) | (a ? 8U : 0U);
+			if (colorMaskValid && colorMask == mask)
+				return;
+
 			CheckExistence(glColorMask);
 			glColorMask(r ? GL_TRUE : GL_FALSE, g ? GL_TRUE : GL_FALSE, b ? GL_TRUE : GL_FALSE,
 			            a ? GL_TRUE : GL_FALSE);
 			CheckError();
+			colorMask = mask;
+			colorMaskValid = true;
 		}
 
 		void SDLGLDevice::FrontFace(Enum val) {
-			CheckExistence(glFrontFace);
+			GLenum mode;
 			switch (val) {
-				case draw::IGLDevice::CW: glFrontFace(GL_CW); break;
-				case draw::IGLDevice::CCW: glFrontFace(GL_CCW); break;
+				case draw::IGLDevice::CW: mode = GL_CW; break;
+				case draw::IGLDevice::CCW: mode = GL_CCW; break;
 				default: SPInvalidEnum("val", val);
 			}
+			if (frontFaceValid && frontFace == val)
+				return;
+
+			CheckExistence(glFrontFace);
+			glFrontFace(mode);
 			CheckError();
+			frontFace = val;
+			frontFaceValid = true;
 		}
 
 		void SDLGLDevice::Enable(spades::draw::IGLDevice::Enum state, bool b) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			GLenum type;
+			int stateIndex = -1;
 			switch (state) {
-				case DepthTest: type = GL_DEPTH_TEST; break;
-				case CullFace: type = GL_CULL_FACE; break;
-				case Blend: type = GL_BLEND; break;
-				case Texture2D: type = GL_TEXTURE_2D; break;
-				case Multisample: type = GL_MULTISAMPLE; break;
-				case FramebufferSRGB: type = GL_FRAMEBUFFER_SRGB; break;
+				case DepthTest:
+					type = GL_DEPTH_TEST;
+					stateIndex = 0;
+					break;
+				case CullFace:
+					type = GL_CULL_FACE;
+					stateIndex = 1;
+					break;
+				case Blend:
+					type = GL_BLEND;
+					stateIndex = 2;
+					break;
+				case Texture2D:
+					// This legacy enable is specific to the active texture unit.
+					type = GL_TEXTURE_2D;
+					break;
+				case Multisample:
+					type = GL_MULTISAMPLE;
+					stateIndex = 3;
+					break;
+				case FramebufferSRGB:
+					type = GL_FRAMEBUFFER_SRGB;
+					stateIndex = 4;
+					break;
 				default: SPInvalidEnum("state", state);
 			}
+			if (stateIndex >= 0 && enabledStates[stateIndex] == (b ? 1 : 0))
+				return;
+
 			if (b)
 				glEnable(type);
 			else
 				glDisable(type);
 			CheckError();
+			if (stateIndex >= 0)
+				enabledStates[stateIndex] = b ? 1 : 0;
 		}
 
 		IGLDevice::Integer SDLGLDevice::GetInteger(Enum type) {
@@ -343,7 +407,7 @@ namespace spades {
 		}
 
 		GLenum SDLGLDevice::parseBlendEquation(spades::draw::IGLDevice::Enum v) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			switch (v) {
 				case Add: return GL_FUNC_ADD;
 				case Subtract: return GL_FUNC_SUBTRACT;
@@ -355,7 +419,7 @@ namespace spades {
 		}
 
 		GLenum SDLGLDevice::parseBlendFunction(spades::draw::IGLDevice::Enum v) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			switch (v) {
 				case Zero: return GL_ZERO;
 				case One: return GL_ONE;
@@ -376,27 +440,65 @@ namespace spades {
 		}
 
 		void SDLGLDevice::BlendEquation(spades::draw::IGLDevice::Enum mode) {
+			GLenum glMode = parseBlendEquation(mode);
+			if (blendEquationValid && blendEquationRgb == mode && blendEquationAlpha == mode)
+				return;
+
 			CheckExistence(glBlendEquation);
-			glBlendEquation(parseBlendEquation(mode));
+			glBlendEquation(glMode);
 			CheckError();
+			blendEquationRgb = mode;
+			blendEquationAlpha = mode;
+			blendEquationValid = true;
 		}
 
 		void SDLGLDevice::BlendEquation(spades::draw::IGLDevice::Enum rgb,
 		                                spades::draw::IGLDevice::Enum alpha) {
+			GLenum glRgb = parseBlendEquation(rgb);
+			GLenum glAlpha = parseBlendEquation(alpha);
+			if (blendEquationValid && blendEquationRgb == rgb && blendEquationAlpha == alpha)
+				return;
+
 			CheckExistence(glBlendEquationSeparate);
-			glBlendEquationSeparate(parseBlendEquation(rgb), parseBlendEquation(alpha));
+			glBlendEquationSeparate(glRgb, glAlpha);
 			CheckError();
+			blendEquationRgb = rgb;
+			blendEquationAlpha = alpha;
+			blendEquationValid = true;
 		}
 		void SDLGLDevice::BlendFunc(Enum src, Enum dest) {
+			GLenum glSource = parseBlendFunction(src);
+			GLenum glDestination = parseBlendFunction(dest);
+			if (blendFunctionValid && blendSourceRgb == src && blendDestinationRgb == dest &&
+			    blendSourceAlpha == src && blendDestinationAlpha == dest)
+				return;
+
 			CheckExistence(glBlendFunc);
-			glBlendFunc(parseBlendFunction(src), parseBlendFunction(dest));
+			glBlendFunc(glSource, glDestination);
 			CheckError();
+			blendSourceRgb = src;
+			blendDestinationRgb = dest;
+			blendSourceAlpha = src;
+			blendDestinationAlpha = dest;
+			blendFunctionValid = true;
 		}
 		void SDLGLDevice::BlendFunc(Enum srcRgb, Enum destRgb, Enum srcAlpha, Enum destAlpha) {
+			GLenum glSourceRgb = parseBlendFunction(srcRgb);
+			GLenum glDestinationRgb = parseBlendFunction(destRgb);
+			GLenum glSourceAlpha = parseBlendFunction(srcAlpha);
+			GLenum glDestinationAlpha = parseBlendFunction(destAlpha);
+			if (blendFunctionValid && blendSourceRgb == srcRgb && blendDestinationRgb == destRgb &&
+			    blendSourceAlpha == srcAlpha && blendDestinationAlpha == destAlpha)
+				return;
+
 			CheckExistence(glBlendFuncSeparate);
-			glBlendFuncSeparate(parseBlendFunction(srcRgb), parseBlendFunction(destRgb),
-			                    parseBlendFunction(srcAlpha), parseBlendFunction(destAlpha));
+			glBlendFuncSeparate(glSourceRgb, glDestinationRgb, glSourceAlpha, glDestinationAlpha);
 			CheckError();
+			blendSourceRgb = srcRgb;
+			blendDestinationRgb = destRgb;
+			blendSourceAlpha = srcAlpha;
+			blendDestinationAlpha = destAlpha;
+			blendFunctionValid = true;
 		}
 		void SDLGLDevice::BlendColor(Float r, Float g, Float b, Float a) {
 			CheckExistence(glBlendColor);
@@ -409,20 +511,27 @@ namespace spades {
 			CheckError();
 		}
 		void SDLGLDevice::DepthFunc(Enum func) {
-			SPADES_MARK_FUNCTION();
-			CheckExistence(glDepthFunc);
+			SPADES_MARK_FUNCTION_DEBUG();
+			GLenum glFunction;
 			switch (func) {
-				case Never: glDepthFunc(GL_NEVER); break;
-				case Always: glDepthFunc(GL_ALWAYS); break;
-				case Less: glDepthFunc(GL_LESS); break;
-				case LessOrEqual: glDepthFunc(GL_LEQUAL); break;
-				case Equal: glDepthFunc(GL_EQUAL); break;
-				case Greater: glDepthFunc(GL_GREATER); break;
-				case GreaterOrEqual: glDepthFunc(GL_GEQUAL); break;
-				case NotEqual: glDepthFunc(GL_NOTEQUAL); break;
+				case Never: glFunction = GL_NEVER; break;
+				case Always: glFunction = GL_ALWAYS; break;
+				case Less: glFunction = GL_LESS; break;
+				case LessOrEqual: glFunction = GL_LEQUAL; break;
+				case Equal: glFunction = GL_EQUAL; break;
+				case Greater: glFunction = GL_GREATER; break;
+				case GreaterOrEqual: glFunction = GL_GEQUAL; break;
+				case NotEqual: glFunction = GL_NOTEQUAL; break;
 				default: SPInvalidEnum("func", func);
 			}
+			if (depthFunctionValid && depthFunction == func)
+				return;
+
+			CheckExistence(glDepthFunc);
+			glDepthFunc(glFunction);
 			CheckError();
+			depthFunction = func;
+			depthFunctionValid = true;
 		}
 
 		IGLDevice::UInteger SDLGLDevice::GenBuffer() {
@@ -458,6 +567,10 @@ namespace spades {
 			glDeleteBuffers(1, &v);
 #endif
 			CheckError();
+			for (CachedUInteger &binding : bufferBindings) {
+				if (binding.valid && binding.value == i)
+					binding.value = 0;
+			}
 		}
 
 		void *SDLGLDevice::MapBuffer(Enum target, Enum access) {
@@ -512,22 +625,37 @@ namespace spades {
 		}
 
 		void SDLGLDevice::BindBuffer(Enum target, UInteger i) {
+			GLenum glTarget = parseBufferTarget(target);
+			int bindingIndex = 0;
+			switch (target) {
+				case ArrayBuffer: bindingIndex = 0; break;
+				case ElementArrayBuffer: bindingIndex = 1; break;
+				case PixelPackBuffer: bindingIndex = 2; break;
+				case PixelUnpackBuffer: bindingIndex = 3; break;
+				default: SPInvalidEnum("target", target);
+			}
+			CachedUInteger &binding = bufferBindings[bindingIndex];
+			if (binding.valid && binding.value == i)
+				return;
+
 #if GLEW
 			if (glBindBuffer)
-				glBindBuffer(parseBufferTarget(target), (GLuint)i);
+				glBindBuffer(glTarget, (GLuint)i);
 			else if (glBindBufferARB)
-				glBindBufferARB(parseBufferTarget(target), (GLuint)i);
+				glBindBufferARB(glTarget, (GLuint)i);
 			else
 				ReportMissingFunc("glBindBuffer");
 #else
 			CheckExistence(glBindBuffer);
-			glBindBuffer(parseBufferTarget(target), (GLuint)i);
+			glBindBuffer(glTarget, (GLuint)i);
 #endif
 			CheckError();
+			binding.value = i;
+			binding.valid = true;
 		}
 
 		void SDLGLDevice::BufferData(Enum target, Sizei size, const void *data, Enum usage) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			GLenum usageVal;
 			switch (usage) {
 				case StaticDraw: usageVal = GL_STATIC_DRAW; break;
@@ -771,6 +899,13 @@ namespace spades {
 			CheckExistence(glDeleteTextures);
 			glDeleteTextures(1, &v);
 			CheckError();
+			textureParameters.erase(i);
+			for (auto &stageBindings : textureBindings) {
+				for (CachedUInteger &binding : stageBindings) {
+					if (binding.valid && binding.value == i)
+						binding.value = 0;
+				}
+			}
 		}
 
 		GLenum SDLGLDevice::parseTextureTarget(Enum v) {
@@ -784,6 +919,9 @@ namespace spades {
 		}
 
 		void SDLGLDevice::ActiveTexture(UInteger stage) {
+			if (activeTextureStageValid && activeTextureStage == stage)
+				return;
+
 #if GLEW
 			if (glActiveTexture)
 				glActiveTexture(GL_TEXTURE0 + stage);
@@ -796,12 +934,38 @@ namespace spades {
 			glActiveTexture(GL_TEXTURE0 + stage);
 #endif
 			CheckError();
+			if (stage < textureBindings.size()) {
+				activeTextureStage = stage;
+				activeTextureStageValid = true;
+			} else {
+				activeTextureStageValid = false;
+			}
 		}
 
 		void SDLGLDevice::BindTexture(Enum target, UInteger tex) {
+			GLenum glTarget = parseTextureTarget(target);
+			int bindingIndex = 0;
+			switch (target) {
+				case Texture2D: bindingIndex = 0; break;
+				case Texture3D: bindingIndex = 1; break;
+				case Texture2DArray: bindingIndex = 2; break;
+				default: SPInvalidEnum("target", target);
+			}
+
+			CachedUInteger *binding = nullptr;
+			if (activeTextureStageValid && activeTextureStage < textureBindings.size()) {
+				binding = &textureBindings[activeTextureStage][bindingIndex];
+				if (binding->valid && binding->value == tex)
+					return;
+			}
+
 			CheckExistence(glBindTexture);
-			glBindTexture(parseTextureTarget(target), tex);
+			glBindTexture(glTarget, tex);
 			CheckError();
+			if (binding) {
+				binding->value = tex;
+				binding->valid = true;
+			}
 		}
 
 		GLenum SDLGLDevice::parseTextureInternalFormat(Enum v) {
@@ -935,127 +1099,161 @@ namespace spades {
 		}
 
 		void SDLGLDevice::TexParamater(Enum target, Enum param, Enum val) {
-			SPADES_MARK_FUNCTION();
-			GLenum targ = parseTextureTarget(target);
-			CheckExistence(glTexParameteri);
+			SPADES_MARK_FUNCTION_DEBUG();
+			GLenum glTarget = parseTextureTarget(target);
+			GLenum glParameter = 0;
+			GLint glValue = 0;
+			int parameterIndex = 0;
+
 			switch (param) {
 				case TextureMinFilter:
+					glParameter = GL_TEXTURE_MIN_FILTER;
+					parameterIndex = 0;
 					switch (val) {
-						case Nearest:
-							glTexParameteri(targ, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-							break;
-						case Linear: glTexParameteri(targ, GL_TEXTURE_MIN_FILTER, GL_LINEAR); break;
-						case NearestMipmapLinear:
-							glTexParameteri(targ, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
-							break;
-						case LinearMipmapLinear:
-							glTexParameteri(targ, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-							break;
-						case NearestMipmapNearest:
-							glTexParameteri(targ, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-							break;
-						case LinearMipmapNearest:
-							glTexParameteri(targ, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
-							break;
+						case Nearest: glValue = GL_NEAREST; break;
+						case Linear: glValue = GL_LINEAR; break;
+						case NearestMipmapLinear: glValue = GL_NEAREST_MIPMAP_LINEAR; break;
+						case LinearMipmapLinear: glValue = GL_LINEAR_MIPMAP_LINEAR; break;
+						case NearestMipmapNearest: glValue = GL_NEAREST_MIPMAP_NEAREST; break;
+						case LinearMipmapNearest: glValue = GL_LINEAR_MIPMAP_NEAREST; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				case TextureMagFilter:
+					glParameter = GL_TEXTURE_MAG_FILTER;
+					parameterIndex = 1;
 					switch (val) {
-						case Nearest:
-							glTexParameteri(targ, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-							break;
-						case Linear: glTexParameteri(targ, GL_TEXTURE_MAG_FILTER, GL_LINEAR); break;
+						case Nearest: glValue = GL_NEAREST; break;
+						case Linear: glValue = GL_LINEAR; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				case TextureWrapS:
+					glParameter = GL_TEXTURE_WRAP_S;
+					parameterIndex = 2;
 					switch (val) {
-						case ClampToEdge:
-							glTexParameteri(targ, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-							break;
-						case Repeat: glTexParameteri(targ, GL_TEXTURE_WRAP_S, GL_REPEAT); break;
+						case ClampToEdge: glValue = GL_CLAMP_TO_EDGE; break;
+						case Repeat: glValue = GL_REPEAT; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				case TextureWrapT:
+					glParameter = GL_TEXTURE_WRAP_T;
+					parameterIndex = 3;
 					switch (val) {
-						case ClampToEdge:
-							glTexParameteri(targ, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-							break;
-						case Repeat: glTexParameteri(targ, GL_TEXTURE_WRAP_T, GL_REPEAT); break;
+						case ClampToEdge: glValue = GL_CLAMP_TO_EDGE; break;
+						case Repeat: glValue = GL_REPEAT; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				case TextureWrapR:
+					glParameter = GL_TEXTURE_WRAP_R;
+					parameterIndex = 4;
 					switch (val) {
-						case ClampToEdge:
-							glTexParameteri(targ, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-							break;
-						case Repeat: glTexParameteri(targ, GL_TEXTURE_WRAP_R, GL_REPEAT); break;
+						case ClampToEdge: glValue = GL_CLAMP_TO_EDGE; break;
+						case Repeat: glValue = GL_REPEAT; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				case TextureCompareMode:
+					glParameter = GL_TEXTURE_COMPARE_MODE;
+					parameterIndex = 5;
 					switch (val) {
 						case draw::IGLDevice::CompareRefToTexture:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_MODE,
-							                GL_COMPARE_REF_TO_TEXTURE);
+							glValue = GL_COMPARE_REF_TO_TEXTURE;
 							break;
-						case draw::IGLDevice::None:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-							break;
+						case draw::IGLDevice::None: glValue = GL_NONE; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				case TextureCompareFunc:
+					glParameter = GL_TEXTURE_COMPARE_FUNC;
+					parameterIndex = 6;
 					switch (val) {
-						case IGLDevice::LessOrEqual:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-							break;
-						case IGLDevice::GreaterOrEqual:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_GEQUAL);
-							break;
-						case IGLDevice::Less:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_LESS);
-							break;
-						case IGLDevice::Greater:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_GREATER);
-							break;
-						case IGLDevice::Equal:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_EQUAL);
-							break;
-						case IGLDevice::NotEqual:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_NOTEQUAL);
-							break;
-						case IGLDevice::Always:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_ALWAYS);
-							break;
-						case IGLDevice::Never:
-							glTexParameteri(targ, GL_TEXTURE_COMPARE_FUNC, GL_NEVER);
-							break;
+						case IGLDevice::LessOrEqual: glValue = GL_LEQUAL; break;
+						case IGLDevice::GreaterOrEqual: glValue = GL_GEQUAL; break;
+						case IGLDevice::Less: glValue = GL_LESS; break;
+						case IGLDevice::Greater: glValue = GL_GREATER; break;
+						case IGLDevice::Equal: glValue = GL_EQUAL; break;
+						case IGLDevice::NotEqual: glValue = GL_NOTEQUAL; break;
+						case IGLDevice::Always: glValue = GL_ALWAYS; break;
+						case IGLDevice::Never: glValue = GL_NEVER; break;
 						default: SPInvalidEnum("val", val);
 					}
 					break;
 				default: SPInvalidEnum("param", param);
 			}
 
+			int bindingIndex = 0;
+			switch (target) {
+				case Texture2D: bindingIndex = 0; break;
+				case Texture3D: bindingIndex = 1; break;
+				case Texture2DArray: bindingIndex = 2; break;
+				default: SPInvalidEnum("target", target);
+			}
+
+			UInteger texture = 0;
+			if (activeTextureStageValid && activeTextureStage < textureBindings.size()) {
+				const CachedUInteger &binding = textureBindings[activeTextureStage][bindingIndex];
+				if (binding.valid)
+					texture = binding.value;
+			}
+
+			if (texture != 0) {
+				auto it = textureParameters.find(texture);
+				if (it != textureParameters.end() && it->second.integerValuesValid[parameterIndex] &&
+				    it->second.integerValues[parameterIndex] == glValue)
+					return;
+			}
+
+			CheckExistence(glTexParameteri);
+			glTexParameteri(glTarget, glParameter, glValue);
 			CheckError();
+
+			if (texture != 0) {
+				TextureParameterState &state = textureParameters[texture];
+				state.integerValues[parameterIndex] = glValue;
+				state.integerValuesValid[parameterIndex] = true;
+			}
 		}
 
 		void SDLGLDevice::TexParamater(Enum target, Enum param, float val) {
-			SPADES_MARK_FUNCTION();
-			GLenum targ = parseTextureTarget(target);
-			CheckExistence(glTexParameterf);
-			switch (param) {
-				case TextureMaxAnisotropy:
-					glTexParameterf(targ, GL_TEXTURE_MAX_ANISOTROPY_EXT, val);
-					break;
+			SPADES_MARK_FUNCTION_DEBUG();
+			GLenum glTarget = parseTextureTarget(target);
+			if (param != TextureMaxAnisotropy)
+				SPInvalidEnum("param", param);
 
-				default: SPInvalidEnum("param", param);
+			int bindingIndex = 0;
+			switch (target) {
+				case Texture2D: bindingIndex = 0; break;
+				case Texture3D: bindingIndex = 1; break;
+				case Texture2DArray: bindingIndex = 2; break;
+				default: SPInvalidEnum("target", target);
 			}
 
+			UInteger texture = 0;
+			if (activeTextureStageValid && activeTextureStage < textureBindings.size()) {
+				const CachedUInteger &binding = textureBindings[activeTextureStage][bindingIndex];
+				if (binding.valid)
+					texture = binding.value;
+			}
+
+			if (texture != 0) {
+				auto it = textureParameters.find(texture);
+				if (it != textureParameters.end() && it->second.floatValuesValid[0] &&
+				    it->second.floatValues[0] == val)
+					return;
+			}
+
+			CheckExistence(glTexParameterf);
+			glTexParameterf(glTarget, GL_TEXTURE_MAX_ANISOTROPY_EXT, val);
 			CheckError();
+
+			if (texture != 0) {
+				TextureParameterState &state = textureParameters[texture];
+				state.floatValues[0] = val;
+				state.floatValuesValid[0] = true;
+			}
 		}
 
 		void SDLGLDevice::GenerateMipmap(spades::draw::IGLDevice::Enum target) {
@@ -1166,6 +1364,10 @@ namespace spades {
 		}
 
 		void SDLGLDevice::EnableVertexAttribArray(UInteger index, bool b) {
+			if (index < vertexAttribArrayStates.size() &&
+			    vertexAttribArrayStates[index] == (b ? 1 : 0))
+				return;
+
 #if GLEW
 			if (glEnableVertexAttribArray) {
 				if (b)
@@ -1188,6 +1390,8 @@ namespace spades {
 				glDisableVertexAttribArray(index);
 #endif
 			CheckError();
+			if (index < vertexAttribArrayStates.size())
+				vertexAttribArrayStates[index] = b ? 1 : 0;
 		}
 
 		void SDLGLDevice::VertexAttribDivisor(UInteger index, UInteger divisor) {
@@ -1197,7 +1401,7 @@ namespace spades {
 		}
 
 		void SDLGLDevice::DrawArrays(Enum mode, Integer first, Sizei count) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			GLenum md;
 			switch (mode) {
 				case Points: md = GL_POINTS; break;
@@ -1217,7 +1421,7 @@ namespace spades {
 		}
 
 		void SDLGLDevice::DrawElements(Enum mode, Sizei count, Enum type, const void *indices) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			GLenum md;
 			switch (mode) {
 				case Points: md = GL_POINTS; break;
@@ -1238,7 +1442,7 @@ namespace spades {
 
 		void SDLGLDevice::DrawArraysInstanced(Enum mode, Integer first, Sizei count,
 		                                      Sizei instances) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			GLenum md;
 			switch (mode) {
 				case Points: md = GL_POINTS; break;
@@ -1269,7 +1473,7 @@ namespace spades {
 
 		void SDLGLDevice::DrawElementsInstanced(Enum mode, Sizei count, Enum type,
 		                                        const void *indices, Sizei instances) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			GLenum md;
 			switch (mode) {
 				case Points: md = GL_POINTS; break;
@@ -1574,6 +1778,9 @@ namespace spades {
 		}
 
 		void SDLGLDevice::UseProgram(UInteger program) {
+			if (currentProgramValid && currentProgram == program)
+				return;
+
 #if GLEW
 			if (glUseProgram)
 				glUseProgram(program);
@@ -1586,6 +1793,8 @@ namespace spades {
 			glUseProgram(program);
 #endif
 			CheckError();
+			currentProgram = program;
+			currentProgramValid = true;
 		}
 
 		void SDLGLDevice::DeleteProgram(UInteger program) {
@@ -1601,6 +1810,8 @@ namespace spades {
 			glDeleteProgram(program);
 #endif
 			CheckError();
+			if (currentProgramValid && currentProgram == program)
+				currentProgramValid = false;
 		}
 
 		void SDLGLDevice::ValidateProgram(UInteger program) {
@@ -1818,19 +2029,35 @@ namespace spades {
 			return (IGLDevice::UInteger)v;
 		}
 		void SDLGLDevice::BindFramebuffer(Enum target, UInteger framebuffer) {
+			GLenum glTarget = parseFramebufferTarget(target);
+			if ((target == Framebuffer && readFramebuffer.valid && drawFramebuffer.valid &&
+			     readFramebuffer.value == framebuffer && drawFramebuffer.value == framebuffer) ||
+			    (target == ReadFramebuffer && readFramebuffer.valid &&
+			     readFramebuffer.value == framebuffer) ||
+			    (target == DrawFramebuffer && drawFramebuffer.valid &&
+			     drawFramebuffer.value == framebuffer))
+				return;
 
 #if GLEW
 			if (glBindFramebuffer)
-				glBindFramebuffer(parseFramebufferTarget(target), framebuffer);
+				glBindFramebuffer(glTarget, framebuffer);
 			else if (glBindFramebufferEXT)
-				glBindFramebufferEXT(parseFramebufferTarget(target), framebuffer);
+				glBindFramebufferEXT(glTarget, framebuffer);
 			else
 				ReportMissingFunc("glBindFramebuffer");
 #else
 			CheckExistence(glBindFramebuffer);
-			glBindFramebuffer(parseFramebufferTarget(target), framebuffer);
+			glBindFramebuffer(glTarget, framebuffer);
 #endif
 			CheckError();
+			if (target == Framebuffer || target == ReadFramebuffer) {
+				readFramebuffer.value = framebuffer;
+				readFramebuffer.valid = true;
+			}
+			if (target == Framebuffer || target == DrawFramebuffer) {
+				drawFramebuffer.value = framebuffer;
+				drawFramebuffer.valid = true;
+			}
 		}
 		void SDLGLDevice::DeleteFramebuffer(UInteger fb) {
 #if GLEW
@@ -1845,6 +2072,10 @@ namespace spades {
 			glDeleteFramebuffers(1, &fb);
 #endif
 			CheckError();
+			if (readFramebuffer.valid && readFramebuffer.value == fb)
+				readFramebuffer.value = 0;
+			if (drawFramebuffer.valid && drawFramebuffer.value == fb)
+				drawFramebuffer.value = 0;
 		}
 		IGLDevice::Enum SDLGLDevice::CheckFramebufferStatus(spades::draw::IGLDevice::Enum target) {
 			GLenum ret = 0;
@@ -1981,21 +2212,29 @@ namespace spades {
 			glDeleteRenderbuffers(1, &v);
 #endif
 			CheckError();
+			if (renderbufferBinding.valid && renderbufferBinding.value == v)
+				renderbufferBinding.value = 0;
 		}
 		void SDLGLDevice::BindRenderbuffer(Enum target, UInteger v) {
 			SPADES_MARK_FUNCTION_DEBUG();
+			GLenum glTarget = parseRenderbufferTarget(target);
+			if (renderbufferBinding.valid && renderbufferBinding.value == v)
+				return;
+
 #if GLEW
 			if (glBindRenderbuffer)
-				glBindRenderbuffer(parseRenderbufferTarget(target), v);
+				glBindRenderbuffer(glTarget, v);
 			else if (glBindRenderbufferEXT)
-				glBindRenderbufferEXT(parseRenderbufferTarget(target), v);
+				glBindRenderbufferEXT(glTarget, v);
 			else
 				ReportMissingFunc("glBindRenderbuffer");
 #else
 			CheckExistence(glBindRenderbuffer);
-			glBindRenderbuffer(parseRenderbufferTarget(target), v);
+			glBindRenderbuffer(glTarget, v);
 #endif
 			CheckError();
+			renderbufferBinding.value = v;
+			renderbufferBinding.valid = true;
 		}
 		void SDLGLDevice::RenderbufferStorage(Enum target, Enum intFormat, Sizei width,
 		                                      Sizei height) {

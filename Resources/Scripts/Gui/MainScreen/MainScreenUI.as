@@ -55,6 +55,9 @@ namespace spades {
             @mainMenu = MainScreenMainMenu(this);
             mainMenu.Bounds = manager.RootElement.Bounds;
             manager.RootElement.AddChild(mainMenu);
+            // ListView needs its final height before installing the initial empty model; otherwise
+            // both the scroll range and page size are zero while ScrollBar lays itself out.
+            mainMenu.LoadServerList();
 
             // Let the new player choose their IGN
             if (cg_playerName.StringValue != "" && cg_playerName.StringValue != "Deuce") {
@@ -151,11 +154,8 @@ namespace spades {
                                    AABB2(0.f, 0.f, renderer.ScreenWidth, renderer.ScreenHeight));
             }
 
-            // draw title logo
-            Image @img = renderer.RegisterImage("Gfx/Title/Logo.png");
-            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 1.f);
-            renderer.DrawImage(img, Vector2((renderer.ScreenWidth - img.Width) * 0.5f, 64.f));
-
+            // Keep the world backdrop free of centered showcase overlays so the compact left
+            // navigation and full-height server browser remain the clear visual hierarchy.
             manager.RunFrame(dt);
             manager.Render();
 

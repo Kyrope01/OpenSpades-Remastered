@@ -335,7 +335,12 @@ namespace spades {
 								p3 += uu;
 								p3 += vv;
 							} else {
-								*(pixels++) = 0x00ff00ff;
+								// No neighbouring voxel can provide a color. Extend the previous
+								// texel (or use black at the start of a row) instead of stamping a
+								// magenta sentinel into the atlas. Otherwise the sentinel can bleed
+								// into face edges when voxel models are heavily downscaled.
+								*pixels = (x > 0) ? pixels[-1] : 0;
+								pixels++;
 								p2 += uu;
 								continue;
 							}
@@ -524,7 +529,7 @@ namespace spades {
 			printf("%d vertices emit\n", (int)indices.size());
 		}
 
-		void GLOptimizedVoxelModel::Prerender(std::vector<client::ModelRenderParam> params,
+		void GLOptimizedVoxelModel::Prerender(const std::vector<client::ModelRenderParam> &params,
 		                                      bool ghostPass) {
 			SPADES_MARK_FUNCTION();
 
@@ -532,7 +537,7 @@ namespace spades {
 		}
 
 		void
-		GLOptimizedVoxelModel::RenderShadowMapPass(std::vector<client::ModelRenderParam> params) {
+		GLOptimizedVoxelModel::RenderShadowMapPass(const std::vector<client::ModelRenderParam> &params) {
 			SPADES_MARK_FUNCTION();
 
 			device->Enable(IGLDevice::CullFace, true);
@@ -577,8 +582,7 @@ namespace spades {
 				}
 
 				// frustrum cull
-				float rad = radius;
-				rad *= param.matrix.GetAxis(0).GetLength();
+				float rad = GetTransformedBoundingRadius(param.matrix, radius);
 
 				if (param.depthHack)
 					continue;
@@ -614,7 +618,7 @@ namespace spades {
 			device->BindTexture(IGLDevice::Texture2D, 0);
 		}
 
-		void GLOptimizedVoxelModel::RenderSunlightPass(std::vector<client::ModelRenderParam> params,
+		void GLOptimizedVoxelModel::RenderSunlightPass(const std::vector<client::ModelRenderParam> &params,
 		                                               bool ghostPass) {
 			SPADES_MARK_FUNCTION();
 
@@ -711,13 +715,6 @@ namespace spades {
 					continue;
 				}
 
-				// frustrum cull
-				float rad = radius;
-				rad *= param.matrix.GetAxis(0).GetLength();
-				if (!renderer->SphereFrustrumCull(param.matrix.GetOrigin(), rad)) {
-					continue;
-				}
-
 				static GLProgramUniform customColor("customColor");
 				customColor(program);
 				customColor.SetValue(param.customColor.x, param.customColor.y, param.customColor.z);
@@ -771,11 +768,29 @@ namespace spades {
 		}
 
 		void
-		GLOptimizedVoxelModel::RenderDynamicLightPass(std::vector<client::ModelRenderParam> params,
-		                                              std::vector<GLDynamicLight> lights) {
+		GLOptimizedVoxelModel::RenderDynamicLightPass(const std::vector<client::ModelRenderParam> &params,
+		                                              const std::vector<GLDynamicLight> &lights) {
 			SPADES_MARK_FUNCTION();
 
 			bool mirror = renderer->IsRenderingMirror();
+			bool hasAffectedInstance = false;
+			for (const client::ModelRenderParam &param : params) {
+				if (param.ghost || (mirror && param.depthHack))
+					continue;
+
+				float rad = GetTransformedBoundingRadius(param.matrix, radius);
+
+				for (const GLDynamicLight &light : lights) {
+					if (light.SphereCull(param.matrix.GetOrigin(), rad)) {
+						hasAffectedInstance = true;
+						break;
+					}
+				}
+				if (hasAffectedInstance)
+					break;
+			}
+			if (!hasAffectedInstance)
+				return;
 
 			device->ActiveTexture(0);
 			aoImage->Bind(IGLDevice::Texture2D);
@@ -850,12 +865,17 @@ namespace spades {
 				if (param.ghost)
 					continue;
 
-				// frustrum cull
-				float rad = radius;
-				rad *= param.matrix.GetAxis(0).GetLength();
-				if (!renderer->SphereFrustrumCull(param.matrix.GetOrigin(), rad)) {
-					continue;
+				float rad = GetTransformedBoundingRadius(param.matrix, radius);
+
+				bool affected = false;
+				for (const GLDynamicLight &light : lights) {
+					if (light.SphereCull(param.matrix.GetOrigin(), rad)) {
+						affected = true;
+						break;
+					}
 				}
+				if (!affected)
+					continue;
 
 				static GLProgramUniform customColor("customColor");
 				customColor(dlightProgram);
@@ -885,11 +905,11 @@ namespace spades {
 				if (param.depthHack) {
 					device->DepthRange(0.f, 0.1f);
 				}
-				for (size_t i = 0; i < lights.size(); i++) {
-					if (!lights[i].SphereCull(param.matrix.GetOrigin(), rad))
+				for (const GLDynamicLight &light : lights) {
+					if (!light.SphereCull(param.matrix.GetOrigin(), rad))
 						continue;
 
-					dlightShader(renderer, dlightProgram, lights[i], 2);
+					dlightShader(renderer, dlightProgram, light, 2);
 
 					device->DrawElements(IGLDevice::Triangles, numIndices, IGLDevice::UnsignedInt,
 					                     (void *)0);

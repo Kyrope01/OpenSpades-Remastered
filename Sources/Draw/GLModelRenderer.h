@@ -39,8 +39,13 @@ namespace spades {
 			IGLDevice *device;
 
 			struct RenderModel {
-				GLModel *model;
-				std::vector<client::ModelRenderParam> params;
+				GLModel *model = nullptr;
+				// Instances are classified once at submission. Draw passes consume only
+				// the lists relevant to their view and pass.
+				std::vector<client::ModelRenderParam> mainParams;
+				std::vector<client::ModelRenderParam> mirrorParams;
+				std::vector<client::ModelRenderParam> ghostParams;
+				std::vector<client::ModelRenderParam> shadowParams;
 			};
 
 			std::vector<RenderModel> models;
@@ -56,7 +61,7 @@ namespace spades {
 
 			void Prerender(bool ghostPass);
 			void RenderSunlightPass(bool ghostPass);
-			void RenderDynamicLightPass(std::vector<GLDynamicLight> lights);
+			void RenderDynamicLightPass(const std::vector<GLDynamicLight> &lights);
 
 			void Clear();
 		};

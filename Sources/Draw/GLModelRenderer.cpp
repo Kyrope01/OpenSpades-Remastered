@@ -37,7 +37,7 @@ namespace spades {
 		}
 
 		void GLModelRenderer::AddModel(GLModel *model, const client::ModelRenderParam &param) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 			if (model->renderId == -1) {
 				model->renderId = (int)models.size();
 				RenderModel m;
@@ -46,7 +46,23 @@ namespace spades {
 				models.push_back(m);
 			}
 			modelCount++;
-			models[model->renderId].params.push_back(param);
+			RenderModel &renderModel = models[model->renderId];
+
+			const float radius =
+			  GLModel::GetTransformedBoundingRadius(param.matrix, model->GetBoundingRadius());
+			const Vector3 origin = param.matrix.GetOrigin();
+			if (param.ghost) {
+				if (renderer->SphereFrustrumCull(origin, radius, false))
+					renderModel.ghostParams.push_back(param);
+			} else {
+				if (renderer->SphereFrustrumCull(origin, radius, false))
+					renderModel.mainParams.push_back(param);
+				if ((int)renderer->GetSettings().r_water >= 2 && !param.depthHack &&
+				    renderer->SphereFrustrumCull(origin, radius, true))
+					renderModel.mirrorParams.push_back(param);
+			}
+			if (param.castShadow && !param.ghost && !param.depthHack)
+				renderModel.shadowParams.push_back(param);
 		}
 
 		void GLModelRenderer::RenderShadowMapPass() {
@@ -58,9 +74,11 @@ namespace spades {
 			int numModels = 0;
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
+				if (m.shadowParams.empty())
+					continue;
 				GLModel *model = m.model;
-				model->RenderShadowMapPass(m.params);
-				numModels += (int)m.params.size();
+				model->RenderShadowMapPass(m.shadowParams);
+				numModels += (int)m.shadowParams.size();
 			}
 #if 0
 			printf("Model types: %d, Number of models: %d\n",
@@ -77,9 +95,14 @@ namespace spades {
 			int numModels = 0;
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
+				const std::vector<client::ModelRenderParam> &params =
+				  ghostPass ? m.ghostParams
+				            : (renderer->IsRenderingMirror() ? m.mirrorParams : m.mainParams);
+				if (params.empty())
+					continue;
 				GLModel *model = m.model;
-				model->Prerender(m.params, ghostPass);
-				numModels += (int)m.params.size();
+				model->Prerender(params, ghostPass);
+				numModels += (int)params.size();
 			}
 			device->ColorMask(true, true, true, true);
 		}
@@ -92,13 +115,18 @@ namespace spades {
 
 			for (size_t i = 0; i < models.size(); i++) {
 				RenderModel &m = models[i];
+				const std::vector<client::ModelRenderParam> &params =
+				  ghostPass ? m.ghostParams
+				            : (renderer->IsRenderingMirror() ? m.mirrorParams : m.mainParams);
+				if (params.empty())
+					continue;
 				GLModel *model = m.model;
 
-				model->RenderSunlightPass(m.params, ghostPass);
+				model->RenderSunlightPass(params, ghostPass);
 			}
 		}
 
-		void GLModelRenderer::RenderDynamicLightPass(std::vector<GLDynamicLight> lights) {
+		void GLModelRenderer::RenderDynamicLightPass(const std::vector<GLDynamicLight> &lights) {
 			SPADES_MARK_FUNCTION();
 
 			GLProfiler::Context profiler(renderer->GetGLProfiler(), "Model [%d model(s), %d unique model type(s)]", modelCount,
@@ -108,10 +136,17 @@ namespace spades {
 
 				for (size_t i = 0; i < models.size(); i++) {
 					RenderModel &m = models[i];
+					const std::vector<client::ModelRenderParam> &params =
+					  renderer->IsRenderingMirror() ? m.mirrorParams : m.mainParams;
+					if (params.empty())
+						continue;
 					GLModel *model = m.model;
 
-					model->RenderDynamicLightPass(m.params, lights);
+					model->RenderDynamicLightPass(params, lights);
 				}
+
+				// Keep the pass postcondition even when every backend rejected all lights.
+				device->ActiveTexture(0);
 			}
 		}
 

@@ -71,6 +71,7 @@ DEFINE_SPADES_SETTING(cg_screenshotFormat, "jpeg");
 DEFINE_SPADES_SETTING(cg_stats, "0");
 DEFINE_SPADES_SETTING(cg_hideHud, "0");
 DEFINE_SPADES_SETTING(cg_playerNames, "2");
+DEFINE_SPADES_SETTING(cg_damageIndicators, "1");
 DEFINE_SPADES_SETTING(cg_playerNameX, "0");
 DEFINE_SPADES_SETTING(cg_playerNameY, "0");
 
@@ -282,6 +283,53 @@ namespace spades {
 				  MakeVector4((1.f - per) * .1f, 0, 0, (1.f - per) * .1f));
 				renderer->DrawImage(renderer->RegisterImage("Gfx/White.tga"),
 				                    AABB2(0, 0, scrWidth, scrHeight));
+			}
+		}
+
+		void Client::UpdateDamageIndicators(float dt) {
+			for (auto it = damageIndicators.begin(); it != damageIndicators.end();) {
+				DamageIndicator &indicator = *it;
+				indicator.fade -= dt;
+				if (indicator.fade <= 0.f) {
+					it = damageIndicators.erase(it);
+					continue;
+				}
+
+				indicator.position += indicator.velocity * dt;
+				++it;
+			}
+		}
+
+		void Client::DrawDamageIndicators() {
+			SPADES_MARK_FUNCTION();
+
+			IFont *mediumFont = fontManager->GetMediumFont();
+			IFont *guiFont = fontManager->GetGuiFont();
+
+			for (const DamageIndicator &indicator : damageIndicators) {
+				Vector3 projected = Project(indicator.position);
+				if (projected.z <= .01f)
+					continue;
+
+				float fade = std::min(indicator.fade, 1.f);
+				IFont *font = indicator.crit ? mediumFont : guiFont;
+				std::string text = ToString(indicator.damage);
+				Vector2 size = font->Measure(text);
+				Vector2 position = MakeVector2(projected.x, projected.y) - size * .5f;
+				position.x = floorf(position.x);
+				position.y = floorf(position.y);
+
+				float strength =
+				  std::min(1.f, std::max(0.f, indicator.damage / 100.f));
+				Vector4 shadow = MakeVector4(0.f, 0.f, 0.f, .4f * fade);
+				Vector4 color = MakeVector4(1.f, 1.f - strength, 0.f, fade);
+				if (indicator.crit) {
+					float pulse = sinf((time - indicator.lastHitTime) * 10.f) * .5f + .5f;
+					color = MakeVector4(1.f, pulse * .8f, pulse * .2f, fade);
+				}
+
+				font->DrawShadow(text, position + MakeVector2(1.f, 1.f), 1.f, shadow, shadow);
+				font->Draw(text, position, 1.f, color);
 			}
 		}
 
@@ -799,6 +847,8 @@ namespace spades {
 				DrawHurtSprites();
 				DrawHurtScreenEffect();
 				DrawHottrackedPlayerName();
+				if ((int)cg_damageIndicators != 0 && !p->IsSpectator())
+					DrawDamageIndicators();
 
 				if (!cg_hideHud) {
 					tcView->Draw();

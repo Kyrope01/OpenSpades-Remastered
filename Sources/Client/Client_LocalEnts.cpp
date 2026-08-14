@@ -32,6 +32,7 @@
 #include "IAudioChunk.h"
 #include "IAudioDevice.h"
 
+#include "BloodMarks.h"
 #include "CenterMessageView.h"
 #include "ChatWindow.h"
 #include "ClientPlayer.h"
@@ -74,7 +75,10 @@ namespace spades {
 		void Client::RemoveAllLocalEntities() {
 			SPADES_MARK_FUNCTION();
 
+			damageIndicators.clear();
 			localEntities.clear();
+			if (bloodMarks)
+				bloodMarks->Clear();
 		}
 
 		void Client::RemoveInvisibleCorpses() {

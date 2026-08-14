@@ -29,6 +29,7 @@ namespace spades {
 
 		class Grenade {
 			World *world;
+			int ownerId;
 			float fuse;
 			Vector3 position;
 			Vector3 velocity;
@@ -43,12 +44,16 @@ namespace spades {
 			int MoveGrenade(float fsynctics);
 
 		public:
-			Grenade(World *, Vector3 pos, Vector3 vel, float fuse);
+			Grenade(World *, int ownerId, Vector3 pos, Vector3 vel, float fuse);
 			~Grenade();
 
 			/** @return true when exploded. */
 			bool Update(float dt);
 
+			/** Returns the estimated AoS grenade damage at a player's position. */
+			int GetDamage(const Vector3 &playerPosition) const;
+
+			int GetOwnerId() const { return ownerId; }
 			Vector3 GetPosition() { return position; }
 			Vector3 GetVelocity() { return velocity; }
 			Quaternion GetOrientation() { return orientation; }

@@ -18,6 +18,7 @@
 
  */
 
+#include <algorithm>
 #include <list>
 #include <set>
 
@@ -29,27 +30,40 @@
 
 namespace spades {
 	static std::list<IFileSystem *> g_fileSystems;
+	namespace {
+		IStream *OpenForReadingInternal(const char *fn, const IFileSystem *excluded) {
+			if (!fn)
+				SPInvalidArgument("fn");
+			if (fn[0] == 0)
+				SPFileNotFound(fn);
+
+			// check each file system
+			for (auto *fs : g_fileSystems) {
+				if (fs != excluded && fs->FileExists(fn))
+					return fs->OpenForReading(fn);
+			}
+
+			// check weak files, too
+			auto weak_fn = std::string(fn) + ".weak";
+			for (auto *fs : g_fileSystems) {
+				if (fs != excluded && fs->FileExists(weak_fn.c_str()))
+					return fs->OpenForReading(weak_fn.c_str());
+			}
+
+			SPFileNotFound(fn);
+		}
+	} // namespace
+
 	IStream *FileManager::OpenForReading(const char *fn) {
 		SPADES_MARK_FUNCTION();
-		if (!fn)
-			SPInvalidArgument("fn");
-		if (fn[0] == 0)
-			SPFileNotFound(fn);
+		return OpenForReadingInternal(fn, nullptr);
+	}
 
-		// check each file system
-		for (auto *fs : g_fileSystems) {
-			if (fs->FileExists(fn))
-				return fs->OpenForReading(fn);
-		}
-
-		// check weak files, too
-		auto weak_fn = std::string(fn) + ".weak";
-		for (auto *fs : g_fileSystems) {
-			if (fs->FileExists(weak_fn.c_str()))
-				return fs->OpenForReading(weak_fn.c_str());
-		}
-
-		SPFileNotFound(fn);
+	IStream *FileManager::OpenForReadingExcluding(const char *fn, const IFileSystem *excluded) {
+		SPADES_MARK_FUNCTION();
+		if (!excluded)
+			SPInvalidArgument("excluded");
+		return OpenForReadingInternal(fn, excluded);
 	}
 	IStream *FileManager::OpenForWriting(const char *fn) {
 		SPADES_MARK_FUNCTION();
@@ -58,8 +72,13 @@ namespace spades {
 		if (fn[0] == 0)
 			SPFileNotFound(fn);
 		for (auto *fs : g_fileSystems) {
-			if (fs->FileExists(fn))
-				return fs->OpenForWriting(fn);
+			if (fs->FileExists(fn)) {
+				try {
+					return fs->OpenForWriting(fn);
+				} catch (...) {
+					// A read-only package may shadow the writable user copy. Keep searching.
+				}
+			}
 		}
 
 		// FIXME: handling of weak files
@@ -113,6 +132,18 @@ namespace spades {
 
 		g_fileSystems.push_front(fs);
 	}
+	bool FileManager::RemoveFileSystem(spades::IFileSystem *fs) {
+		SPADES_MARK_FUNCTION();
+		if (!fs)
+			SPInvalidArgument("fs");
+
+		auto it = std::find(g_fileSystems.begin(), g_fileSystems.end(), fs);
+		if (it == g_fileSystems.end())
+			return false;
+		delete *it;
+		g_fileSystems.erase(it);
+		return true;
+	}
 
 	std::string FileManager::ReadAllBytes(const char *fn) {
 		SPADES_MARK_FUNCTION();
@@ -128,27 +159,44 @@ namespace spades {
 		}
 	}
 
-	std::vector<std::string> FileManager::EnumFiles(const char *path) {
-		std::vector<std::string> list;
-		std::set<std::string> set;
-		if (!path)
-			SPInvalidArgument("path");
+	namespace {
+		std::vector<std::string> EnumFilesInternal(const char *path,
+		                                           const IFileSystem *excluded) {
+			std::vector<std::string> list;
+			std::set<std::string> set;
+			if (!path)
+				SPInvalidArgument("path");
 
-		for (auto *fs : g_fileSystems) {
-			std::vector<std::string> l = fs->EnumFiles(path);
-			for (size_t i = 0; i < l.size(); i++)
-				set.insert(l[i]);
+			for (auto *fs : g_fileSystems) {
+				if (fs == excluded)
+					continue;
+				std::vector<std::string> l = fs->EnumFiles(path);
+				for (size_t i = 0; i < l.size(); i++)
+					set.insert(l[i]);
+			}
+
+			for (auto &s : set)
+				list.push_back(s);
+
+			return list;
 		}
+	} // namespace
 
-		for (auto &s : set)
-			list.push_back(s);
+	std::vector<std::string> FileManager::EnumFiles(const char *path) {
+		return EnumFilesInternal(path, nullptr);
+	}
 
-		return list;
+	std::vector<std::string> FileManager::EnumFilesExcluding(const char *path,
+	                                                        const IFileSystem *excluded) {
+		if (!excluded)
+			SPInvalidArgument("excluded");
+		return EnumFilesInternal(path, excluded);
 	}
 
 	void FileManager::Close() {
-		for (auto *fs: g_fileSystems) {
+		for (auto *fs : g_fileSystems) {
 			delete fs;
 		}
-	}       
+		g_fileSystems.clear();
+	}
 }

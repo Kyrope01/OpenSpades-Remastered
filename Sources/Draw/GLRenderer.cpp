@@ -208,7 +208,7 @@ namespace spades {
 				GLLensFlareFilter(this);
 			}
 
-			if (settings.r_colorCorrection) {
+			if (settings.r_colorCorrection || settings.r_filmicToneMapping) {
 				GLColorCorrectionFilter(this);
 			}
 
@@ -427,12 +427,14 @@ namespace spades {
 			mat.m[14] = -(far * near * 2.f) / c;
 			mat.m[15] = 0.f;
 
+			projectionJitter = MakeVector2(0.f, 0.f);
 			if (settings.r_temporalAA && temporalAAFilter) {
 				float jitterX = 1.0f / GetRenderWidth();
 				float jitterY = 1.0f / GetRenderHeight();
 				Vector2 jitter = temporalAAFilter->GetProjectionMatrixJitter();
 				jitterX *= jitter.x * 1.3f;
 				jitterY *= jitter.y * 1.3f;
+				projectionJitter = MakeVector2(jitterX, jitterY);
 				mat = Matrix4::Translate(jitterX, jitterY, 0.0f) * mat;
 			}
 
@@ -481,6 +483,16 @@ namespace spades {
 			  sceneDef.viewOrigin, sceneDef.viewAxis[2] * ySin - sceneDef.viewAxis[1] * yCos);
 			frustrum[5] = Plane3::PlaneWithPointOnPlane(
 			  sceneDef.viewOrigin, sceneDef.viewAxis[2] * ySin + sceneDef.viewAxis[1] * yCos);
+
+			// The GPU projection can be shifted by temporal AA. Expand the analytic
+			// side planes by the largest world-space displacement at zFar so the CPU
+			// frustum never rejects geometry covered by the jittered projection.
+			const float xMargin = fabsf(projectionJitter.x) * sceneDef.zFar * xSin + 1.e-4f;
+			const float yMargin = fabsf(projectionJitter.y) * sceneDef.zFar * ySin + 1.e-4f;
+			frustrum[2].w += xMargin;
+			frustrum[3].w += xMargin;
+			frustrum[4].w += yMargin;
+			frustrum[5].w += yMargin;
 		}
 
 		void GLRenderer::EnsureSceneStarted() {
@@ -533,7 +545,7 @@ namespace spades {
 #pragma mark - Add Scene Objects
 
 		void GLRenderer::RenderModel(client::IModel *model, const client::ModelRenderParam &param) {
-			SPADES_MARK_FUNCTION();
+			SPADES_MARK_FUNCTION_DEBUG();
 
 			GLModel *m = dynamic_cast<GLModel *>(model);
 			if (!m) {
@@ -549,9 +561,20 @@ namespace spades {
 		}
 
 		void GLRenderer::AddLight(const client::DynamicLightParam &light) {
-			if (!settings.r_dlights)
+			if (!settings.r_dlights && !light.ignoreGlobalDisable)
 				return;
-			if (!SphereFrustrumCull(light.origin, light.radius))
+
+			Vector3 cullOrigin = light.origin;
+			float cullRadius = light.radius;
+			if (light.type == client::DynamicLightTypeLinear) {
+				Vector3 halfSegment = (light.point2 - light.origin) * 0.5f;
+				cullOrigin += halfSegment;
+				cullRadius += halfSegment.GetLength();
+			}
+			bool visible = SphereFrustrumCull(cullOrigin, cullRadius, false);
+			if ((int)settings.r_water >= 2)
+				visible |= SphereFrustrumCull(cullOrigin, cullRadius, true);
+			if (!visible)
 				return;
 			EnsureInitialized();
 			EnsureSceneStarted();
@@ -587,6 +610,11 @@ namespace spades {
 			GLImage *im = dynamic_cast<GLImage *>(img);
 			if (!im)
 				SPInvalidArgument("im");
+
+			// Long sprites are contained by a conservative capsule. Reject only when
+			// both capsule endpoints lie completely outside the same frustum plane.
+			if (!CapsuleFrustrumCull(p1, p2, radius * 1.5f))
+				return;
 
 			EnsureInitialized();
 			EnsureSceneStarted();
@@ -1063,21 +1091,30 @@ namespace spades {
 					handle = GLNonlinearlizeFilter(this).Filter(handle);
 				}
 
-				if (settings.r_colorCorrection) {
-					GLProfiler::Context p(*profiler, "Color Correction");
-					Vector3 tint = smoothedFogColor + MakeVector3(1.f, 1.f, 1.f) * 0.5f;
-					tint = MakeVector3(1.f, 1.f, 1.f) / tint;
-					tint = Mix(tint, MakeVector3(1.f, 1.f, 1.f), 0.2f);
-					tint *= 1.f / std::min(std::min(tint.x, tint.y), tint.z);
+				if (settings.r_colorCorrection || settings.r_filmicToneMapping) {
+					GLProfiler::Context p(*profiler, "Color Correction / Filmic Tonemapping");
+					Vector3 tint = MakeVector3(1.f, 1.f, 1.f);
+					float fogLuminance = 0.f;
 
-					float fogLuminance = (fogColor.x + fogColor.y + fogColor.z) * (1.0f / 3.0f);
+					if (settings.r_colorCorrection) {
+						tint = smoothedFogColor + MakeVector3(1.f, 1.f, 1.f) * 0.5f;
+						tint = MakeVector3(1.f, 1.f, 1.f) / tint;
+						tint = Mix(tint, MakeVector3(1.f, 1.f, 1.f), 0.2f);
+						tint *= 1.f / std::min(std::min(tint.x, tint.y), tint.z);
 
-					float exposure = powf(2.f, (float)settings.r_exposureValue * 0.5f);
-					handle =
-					  GLColorCorrectionFilter(this).Filter(handle, tint * exposure, fogLuminance);
+						fogLuminance =
+						  (fogColor.x + fogColor.y + fogColor.z) * (1.0f / 3.0f);
 
-					// update smoothed fog color
-					smoothedFogColor = Mix(smoothedFogColor, fogColor, 0.002f);
+						float exposure = powf(2.f, (float)settings.r_exposureValue * 0.5f);
+						tint *= exposure;
+					}
+
+					handle = GLColorCorrectionFilter(this).Filter(handle, tint, fogLuminance);
+
+					if (settings.r_colorCorrection) {
+						// update smoothed fog color
+						smoothedFogColor = Mix(smoothedFogColor, fogColor, 0.002f);
+					}
 				}
 			}
 
@@ -1385,33 +1422,44 @@ namespace spades {
 		}
 
 		bool GLRenderer::BoxFrustrumCull(const AABB3 &box) {
-			if (IsRenderingMirror()) {
-				// reflect
-				AABB3 bx = box;
-				std::swap(bx.min.z, bx.max.z);
-				bx.min.z = 63.f * 2.f - bx.min.z;
-				bx.max.z = 63.f * 2.f - bx.max.z;
-				return PlaneCullTest(frustrum[0], bx) && PlaneCullTest(frustrum[1], bx) &&
-				       PlaneCullTest(frustrum[2], bx) && PlaneCullTest(frustrum[3], bx) &&
-				       PlaneCullTest(frustrum[4], bx) && PlaneCullTest(frustrum[5], bx);
-			}
-			return PlaneCullTest(frustrum[0], box) && PlaneCullTest(frustrum[1], box) &&
-			       PlaneCullTest(frustrum[2], box) && PlaneCullTest(frustrum[3], box) &&
-			       PlaneCullTest(frustrum[4], box) && PlaneCullTest(frustrum[5], box);
+			return BoxFrustrumCull(box, IsRenderingMirror());
 		}
-		bool GLRenderer::SphereFrustrumCull(const Vector3 &center, float radius) {
-			if (IsRenderingMirror()) {
-				// reflect
-				Vector3 vx = center;
-				vx.z = 63.f * 2.f - vx.z;
-				for (int i = 0; i < 6; i++) {
-					if (frustrum[i].GetDistanceTo(vx) < -radius)
-						return false;
-				}
-				return true;
+
+		bool GLRenderer::BoxFrustrumCull(const AABB3 &box, bool mirror) {
+			AABB3 testBox = box;
+			if (mirror) {
+				// Reflect around the fixed water plane while keeping min <= max.
+				const float oldMinZ = testBox.min.z;
+				testBox.min.z = 63.f * 2.f - testBox.max.z;
+				testBox.max.z = 63.f * 2.f - oldMinZ;
 			}
+
+			return PlaneCullTest(frustrum[0], testBox) && PlaneCullTest(frustrum[1], testBox) &&
+			       PlaneCullTest(frustrum[2], testBox) && PlaneCullTest(frustrum[3], testBox) &&
+			       PlaneCullTest(frustrum[4], testBox) && PlaneCullTest(frustrum[5], testBox);
+		}
+
+		bool GLRenderer::SphereFrustrumCull(const Vector3 &center, float radius) {
+			return SphereFrustrumCull(center, radius, IsRenderingMirror());
+		}
+
+		bool GLRenderer::SphereFrustrumCull(const Vector3 &center, float radius, bool mirror) {
+			Vector3 testCenter = center;
+			if (mirror)
+				testCenter.z = 63.f * 2.f - testCenter.z;
+
 			for (int i = 0; i < 6; i++) {
-				if (frustrum[i].GetDistanceTo(center) < -radius)
+				if (frustrum[i].GetDistanceTo(testCenter) < -radius)
+					return false;
+			}
+			return true;
+		}
+
+		bool GLRenderer::CapsuleFrustrumCull(const Vector3 &point1, const Vector3 &point2,
+		                                     float radius) {
+			for (int i = 0; i < 6; i++) {
+				if (frustrum[i].GetDistanceTo(point1) < -radius &&
+				    frustrum[i].GetDistanceTo(point2) < -radius)
 					return false;
 			}
 			return true;

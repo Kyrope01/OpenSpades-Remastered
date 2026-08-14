@@ -26,13 +26,17 @@
 #include "World.h"
 #include <Core/Debug.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace spades {
 	namespace client {
-		Grenade::Grenade(World *w, Vector3 pos, Vector3 vel, float fuse) {
+		Grenade::Grenade(World *w, int ownerId, Vector3 pos, Vector3 vel, float fuse) {
 			SPADES_MARK_FUNCTION();
 
 			position = pos;
 			velocity = vel;
+			this->ownerId = ownerId;
 			this->fuse = fuse;
 			world = w;
 			orientation = Quaternion {0.0f, 0.0f, 0.0f, 1.0f};
@@ -62,6 +66,24 @@ namespace spades {
 
 			if (world->GetListener())
 				world->GetListener()->GrenadeExploded(this);
+		}
+
+		int Grenade::GetDamage(const Vector3 &playerPosition) const {
+			// This mirrors the AoS server's inverse-square grenade damage estimate.
+			// The server remains authoritative, so modded servers may report a
+			// different final value.
+			static const float damageRadius = 16.f;
+			static const float damageScalar = 4096.f;
+			Vector3 diff = playerPosition - position;
+			if (fabsf(diff.x) >= damageRadius || fabsf(diff.y) >= damageRadius ||
+			    fabsf(diff.z) >= damageRadius) {
+				return 0;
+			}
+
+			float distanceSquared = diff.GetPoweredLength();
+			if (distanceSquared == 0.f)
+				return 100;
+			return std::min((int)ceilf(damageScalar / distanceSquared), 100);
 		}
 
 		int Grenade::MoveGrenade(float fsynctics) {

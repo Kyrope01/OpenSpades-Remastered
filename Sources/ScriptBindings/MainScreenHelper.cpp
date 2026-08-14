@@ -92,6 +92,36 @@ namespace spades {
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "array<string>@ GetMods()",
+												  asMETHOD(gui::MainScreenHelper, GetMods),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "array<string>@ GetActiveMods()",
+												  asMETHOD(gui::MainScreenHelper, GetActiveMods),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "array<string>@ GetLoadedMods()",
+												  asMETHOD(gui::MainScreenHelper, GetLoadedMods),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "string SetModEnabled(string, bool)",
+												  asMETHOD(gui::MainScreenHelper, SetModEnabled),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "string DisableAllMods()",
+												  asMETHOD(gui::MainScreenHelper, DisableAllMods),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "void RestartForModChange()",
+												  asMETHOD(gui::MainScreenHelper, RestartForModChange),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
 												  "string get_Credits()",
 												  asMETHOD(gui::MainScreenHelper, GetCredits),
 												  asCALL_THISCALL);

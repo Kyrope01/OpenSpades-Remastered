@@ -64,6 +64,7 @@ namespace spades {
 		class PaletteView;
 		class TCProgressView;
 		class ClientPlayer;
+		class BloodMarks;
 
 		class ClientUI;
 
@@ -159,6 +160,23 @@ namespace spades {
 				float strength;
 			};
 			std::vector<HurtSprite> hurtSprites;
+
+			struct DamageIndicator {
+				int damage;
+				int playerId;
+				unsigned int fireSequence;
+				float fade;
+				float lastHitTime;
+				Vector3 position;
+				Vector3 velocity;
+				bool crit;
+
+				DamageIndicator()
+				    : damage(0), playerId(-1), fireSequence(0), fade(0.f), lastHitTime(0.f),
+				      crit(false) {}
+			};
+			std::list<DamageIndicator> damageIndicators;
+			unsigned int localFireSequence = 0;
 
 			float GetAimDownState();
 			float GetSprintState();
@@ -317,6 +335,7 @@ namespace spades {
 			float mapReceivingProgressSmoothed = 0.0;
 
 			std::list<std::unique_ptr<ILocalEntity>> localEntities;
+			std::unique_ptr<BloodMarks> bloodMarks;
 			std::list<std::unique_ptr<Corpse>> corpses;
 			Corpse *lastMyCorpse;
 			float corpseSoftTimeLimit;
@@ -369,6 +388,8 @@ namespace spades {
 			 */
 			void DrawSpectateHUD();
 
+			void UpdateDamageIndicators(float dt);
+			void DrawDamageIndicators();
 			void DrawHottrackedPlayerName();
 			void DrawHurtScreenEffect();
 			void DrawHurtSprites();

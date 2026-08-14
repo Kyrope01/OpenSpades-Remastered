@@ -20,13 +20,27 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace spades {
-    class ServerAddress;
+	class ServerAddress;
 
 	/** The path to the user resource directory. Can be empty. */
 	extern std::string g_userResourceDirectory;
 
-    void StartClient(const ServerAddress &, const std::string &playerName);
-    void StartMainScreen();
+	/** Returns supported package archives directly inside the user resource directory. */
+	std::vector<std::string> GetAvailableUserMods();
+	/** Returns enabled mods for the next launch, ordered from highest priority to lowest. */
+	std::vector<std::string> GetActiveUserMods();
+	/** Returns mods mounted during this process's startup in resource override order. */
+	std::vector<std::string> GetLoadedUserMods();
+	/** Validates and enables/disables one mod for the next launch. */
+	std::string SetUserModEnabled(const std::string &name, bool enabled);
+	/** Disables every user mod for the next launch. */
+	std::string DisableAllUserMods();
+	/** Requests a clean process relaunch after the current main-screen runner closes. */
+	void RequestApplicationRestart();
+
+	void StartClient(const ServerAddress &, const std::string &playerName);
+	void StartMainScreen();
 }
