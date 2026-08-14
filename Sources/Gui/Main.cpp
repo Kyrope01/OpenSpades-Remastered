@@ -19,6 +19,7 @@
  */
 
 #include <algorithm> //std::sort
+#include <cctype>
 #include <memory>
 #include <regex>
 
@@ -67,6 +68,8 @@ FILE __iob_func[3] = {*stdin, *stdout, *stderr};
 #endif
 
 DEFINE_SPADES_SETTING(cl_showStartupWindow, "1");
+// Empty by default: archives in the per-user Resources directory are opt-in mods.
+DEFINE_SPADES_SETTING(cl_activeMod, "");
 
 #ifdef WIN32
 // windows.h must be included before DbgHelp.h and shlobj.h.
@@ -223,8 +226,96 @@ namespace {
 	}
 } // namespace
 
+namespace {
+	spades::DirectoryFileSystem *g_userResourceFileSystem = nullptr;
+	spades::ZipFileSystem *g_activeUserModFileSystem = nullptr;
+	std::string g_activeUserMod;
+
+	bool IsPackageArchiveName(const std::string &name) {
+		if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
+			return false;
+		std::string lower = name;
+		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+			return static_cast<char>(std::tolower(c));
+		});
+		return lower.size() > 4 &&
+		       (lower.compare(lower.size() - 4, 4, ".pak") == 0 ||
+		        lower.compare(lower.size() - 4, 4, ".zip") == 0 ||
+		        lower.compare(lower.size() - 4, 4, ".pzk") == 0);
+	}
+}
+
 namespace spades {
 	std::string g_userResourceDirectory;
+
+	std::vector<std::string> GetAvailableUserMods() {
+		std::vector<std::string> mods;
+		if (g_userResourceDirectory.empty())
+			return mods;
+
+		DirectoryFileSystem userFiles(g_userResourceDirectory, false);
+		for (const std::string &name : userFiles.EnumFiles("")) {
+			if (IsPackageArchiveName(name) && userFiles.FileExists(name.c_str()))
+				mods.push_back(name);
+		}
+		std::sort(mods.begin(), mods.end(), [](const std::string &a, const std::string &b) {
+			return std::lexicographical_compare(
+			  a.begin(), a.end(), b.begin(), b.end(), [](unsigned char x, unsigned char y) {
+				  return std::tolower(x) < std::tolower(y);
+			  });
+		});
+		return mods;
+	}
+
+	std::string GetActiveUserMod() { return g_activeUserMod; }
+
+	std::string SetActiveUserMod(const std::string &name) {
+		if (name.empty()) {
+			if (g_activeUserModFileSystem) {
+				FileManager::RemoveFileSystem(g_activeUserModFileSystem);
+				g_activeUserModFileSystem = nullptr;
+			}
+			g_activeUserMod.clear();
+			cl_activeMod = std::string();
+			Settings::GetInstance()->Flush();
+			SPLog("User mods disabled");
+			return std::string();
+		}
+
+		const std::vector<std::string> mods = GetAvailableUserMods();
+		if (std::find(mods.begin(), mods.end(), name) == mods.end())
+			return "The selected mod is no longer present in the user Resources directory.";
+
+		if (name == g_activeUserMod && g_activeUserModFileSystem) {
+			cl_activeMod = name;
+			Settings::GetInstance()->Flush();
+			return std::string();
+		}
+
+		DirectoryFileSystem userFiles(g_userResourceDirectory, false);
+		std::unique_ptr<ZipFileSystem> newFileSystem;
+		try {
+			std::unique_ptr<IStream> stream(userFiles.OpenForReading(name.c_str()));
+			newFileSystem.reset(new ZipFileSystem(stream.get()));
+			stream.release(); // ZipFileSystem owns it after successful construction.
+		} catch (const std::exception &ex) {
+			return Format("Unable to load mod '{0}': {1}", name, ex.what());
+		}
+
+		// Validate the replacement before disturbing the currently mounted package. The selected
+		// mod is prepended so its files override both built-in packages and loose resources.
+		ZipFileSystem *mountedFileSystem = newFileSystem.get();
+		FileManager::PrependFileSystem(mountedFileSystem);
+		newFileSystem.release();
+		if (g_activeUserModFileSystem)
+			FileManager::RemoveFileSystem(g_activeUserModFileSystem);
+		g_activeUserModFileSystem = mountedFileSystem;
+		g_activeUserMod = name;
+		cl_activeMod = name;
+		Settings::GetInstance()->Flush();
+		SPLog("User mod enabled: %s", name.c_str());
+		return std::string();
+	}
 
 	void StartClient(const spades::ServerAddress &addr) {
 		class ConcreteRunner : public spades::gui::Runner {
@@ -343,19 +434,19 @@ int main(int argc, char **argv) {
 		    (userAppDirAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
 			SPLog("UserResources found - switching to 'portable' mode");
 
-			spades::FileManager::AddFileSystem(
-			  new spades::DirectoryFileSystem(Utf8FromWString(userAppDir.c_str()), true));
-
 			spades::g_userResourceDirectory = Utf8FromWString(userAppDir.c_str());
+			g_userResourceFileSystem =
+			  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+			spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 		} else {
 			if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, buf))) {
 				std::wstring datadir = buf;
 				datadir += L"\\OpenSpades\\Resources";
 
 				spades::g_userResourceDirectory = Utf8FromWString(datadir.c_str());
-
-				spades::FileManager::AddFileSystem(
-				  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true));
+				g_userResourceFileSystem =
+				  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+				spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 			} else {
 				SPLog("SHGetFolderPathW failed.");
 			}
@@ -387,8 +478,9 @@ int main(int argc, char **argv) {
 		spades::g_userResourceDirectory =
 		  home + "/Library/Application Support/OpenSpades/Resources";
 
-		spades::FileManager::AddFileSystem(
-		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true));
+		g_userResourceFileSystem =
+		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+		spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 #else
 		std::string home = getenv("HOME");
 
@@ -402,7 +494,7 @@ int main(int argc, char **argv) {
 		if (getenv("XDG_DATA_HOME") == NULL) {
 			SPLog("XDG_DATA_HOME not defined. Assuming that XDG_DATA_HOME is ~/.local/share");
 		} else {
-			std::string xdg_data_home = getenv("XDG_DATA_HOME");
+			xdg_data_home = getenv("XDG_DATA_HOME");
 			SPLog("XDG_DATA_HOME is %s", xdg_data_home.c_str());
 		}
 
@@ -436,8 +528,9 @@ int main(int argc, char **argv) {
 
 		spades::g_userResourceDirectory = xdg_data_home + "/openspades/Resources";
 
-		spades::FileManager::AddFileSystem(
-		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true));
+		g_userResourceFileSystem =
+		  new spades::DirectoryFileSystem(spades::g_userResourceDirectory, true);
+		spades::FileManager::AddFileSystem(g_userResourceFileSystem);
 
 #endif
 
@@ -509,12 +602,16 @@ int main(int argc, char **argv) {
 			        ex.what());
 		}
 
-		// search current file system for .pak files
+		// Search application resources for packaged data. Archives directly inside the user
+		// Resources directory are mods and stay unmounted unless cl_activeMod selects one.
 		{
 			std::vector<spades::IFileSystem *> fss;
 			std::vector<spades::IFileSystem *> fssImportant;
 
-			std::vector<std::string> files = spades::FileManager::EnumFiles("");
+			std::vector<std::string> files =
+			  g_userResourceFileSystem
+			    ? spades::FileManager::EnumFilesExcluding("", g_userResourceFileSystem)
+			    : spades::FileManager::EnumFiles("");
 
 			struct Comparator {
 				static int GetPakId(const std::string &str) {
@@ -541,20 +638,22 @@ int main(int argc, char **argv) {
 			for (size_t i = 0; i < files.size(); i++) {
 				std::string name = files[i];
 
-				// check extension
-				if (name.size() < 4 || (name.rfind(".pak") != name.size() - 4 &&
-				                        name.rfind(".zip") != name.size() - 4)) {
+				if (!IsPackageArchiveName(name)) {
 					SPLog("Ignored loose file: %s", name.c_str());
 					continue;
 				}
-
-				if (spades::FileManager::FileExists(name.c_str())) {
-					spades::IStream *stream = spades::FileManager::OpenForReading(name.c_str());
-					uLong crc = computeCrc32ForStream(stream);
+				{
+					std::unique_ptr<spades::IStream> stream(
+					  g_userResourceFileSystem
+					    ? spades::FileManager::OpenForReadingExcluding(name.c_str(),
+					                                                       g_userResourceFileSystem)
+					    : spades::FileManager::OpenForReading(name.c_str()));
+					uLong crc = computeCrc32ForStream(stream.get());
 
 					stream->SetPosition(0);
 
-					spades::ZipFileSystem *fs = new spades::ZipFileSystem(stream);
+					spades::ZipFileSystem *fs = new spades::ZipFileSystem(stream.get());
+					stream.release();
 					if (name[0] == '_' && false) { // last resort for #198
 						SPLog("Pak registered: %s: %08lx (marked as 'important')", name.c_str(),
 						      static_cast<unsigned long>(crc));
@@ -571,6 +670,17 @@ int main(int argc, char **argv) {
 			}
 			for (size_t i = 0; i < fssImportant.size(); i++) {
 				spades::FileManager::PrependFileSystem(fssImportant[i]);
+			}
+
+			std::string requestedMod = cl_activeMod;
+			if (!requestedMod.empty()) {
+				std::string error = spades::SetActiveUserMod(requestedMod);
+				if (!error.empty()) {
+					SPLog("Failed to enable configured user mod '%s': %s", requestedMod.c_str(),
+					      error.c_str());
+					// Do not retry an absent or damaged package on every launch.
+					spades::SetActiveUserMod(std::string());
+				}
 			}
 		}
 		pumpEvents();

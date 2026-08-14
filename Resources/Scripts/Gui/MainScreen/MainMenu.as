@@ -19,6 +19,7 @@
  */
 
 #include "ServerList.as"
+#include "ModList.as"
 #include "../Preferences.as"
 #include "../UIFramework/DropDownList.as"
 
@@ -194,6 +195,7 @@ namespace spades {
         private MainScreenPanel @browserPanel;
 
         private MainScreenNavigationButton @serversButton;
+        private MainScreenNavigationButton @modsButton;
         private MainScreenNavigationButton @settingsButton;
         private MainScreenNavigationButton @controlsButton;
         private MainScreenNavigationButton @creditsButton;
@@ -221,6 +223,16 @@ namespace spades {
         private MainScreenServerListLoadingView @serverListLoadingView;
         private MainScreenServerListErrorView @serverListErrorView;
         private MainScreenServerItem @selectedServer;
+
+        private spades::ui::Label @modsTitle;
+        private spades::ui::Label @modsHelp;
+        private spades::ui::Label @modsApplyHelp;
+        private spades::ui::Label @modsStatus;
+        private spades::ui::Label @modsEmptyLabel;
+        private spades::ui::ListView @modsListView;
+        private spades::ui::Button @disableModsButton;
+        private spades::ui::Button @refreshModsButton;
+        private bool modsPageVisible = false;
 
         private bool serverListLoaded = false;
         private bool serverListLoading = false;
@@ -259,6 +271,10 @@ namespace spades {
             serversButton.Toggle = true;
             serversButton.Toggled = true;
             @serversButton.Activated = spades::ui::EventHandler(this.ServersButtonPressed);
+
+            @modsButton = MakeNavigationButton(_Tr("MainScreen", "Mods"));
+            modsButton.Toggle = true;
+            @modsButton.Activated = spades::ui::EventHandler(this.ModsButtonPressed);
 
             @settingsButton = MakeNavigationButton(_Tr("MainScreen", "Settings"));
             @settingsButton.Activated = spades::ui::EventHandler(this.SettingsButtonPressed);
@@ -350,6 +366,52 @@ namespace spades {
             serverListErrorView.Visible = false;
             AddChild(serverListErrorView);
 
+            @modsTitle = spades::ui::Label(Manager);
+            modsTitle.Text = _Tr("MainScreen", "Installed Mods");
+            modsTitle.TextScale = 1.2f;
+            modsTitle.TextColor = Vector4(1.f, 1.f, 1.f, 1.f);
+            modsTitle.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsTitle);
+
+            @modsHelp = spades::ui::Label(Manager);
+            modsHelp.Text = _Tr("MainScreen", "Double-click a .pak, .zip, or .pzk archive to enable it.");
+            modsHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
+            modsHelp.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsHelp);
+
+            @modsApplyHelp = spades::ui::Label(Manager);
+            modsApplyHelp.Text =
+                _Tr("MainScreen", "Newly loaded files change now; restart fully applies scripts, localization, and cached files.");
+            modsApplyHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
+            modsApplyHelp.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsApplyHelp);
+
+            @modsStatus = spades::ui::Label(Manager);
+            modsStatus.Alignment = Vector2(0.f, 0.5f);
+            AddChild(modsStatus);
+
+            @modsListView = spades::ui::ListView(Manager);
+            modsListView.RowHeight = 32.f;
+            AddChild(modsListView);
+
+            @modsEmptyLabel = spades::ui::Label(Manager);
+            modsEmptyLabel.Text = _Tr("MainScreen", "No mod archives were found in your Resources directory.");
+            modsEmptyLabel.TextColor = Vector4(0.72f, 0.72f, 0.72f, 1.f);
+            modsEmptyLabel.Alignment = Vector2(0.5f, 0.5f);
+            AddChild(modsEmptyLabel);
+
+            @disableModsButton = spades::ui::Button(Manager);
+            disableModsButton.Caption = _Tr("MainScreen", "Disable Mod");
+            @disableModsButton.Activated = spades::ui::EventHandler(this.DisableModsButtonPressed);
+            AddChild(disableModsButton);
+
+            @refreshModsButton = spades::ui::Button(Manager);
+            refreshModsButton.Caption = _Tr("MainScreen", "Refresh");
+            @refreshModsButton.Activated = spades::ui::EventHandler(this.RefreshModsButtonPressed);
+            AddChild(refreshModsButton);
+
+            UpdatePageVisibility();
+
             // MainScreenUI starts the query after assigning this menu's initial bounds. Setting
             // the empty model while the list still has zero height would leave its scroll range
             // and page size at zero during ScrollBar.Layout().
@@ -368,6 +430,63 @@ namespace spades {
             @header.Activated = handler;
             AddChild(header);
             return header;
+        }
+
+        private void UpdatePageVisibility() {
+            bool showServers = !modsPageVisible;
+            spades::ui::UIElement @[] serverElements = {
+                quickConnectField, protocol75Button, protocol76Button, connectButton, localButton,
+                refreshButton, serverListSourceButton, serverFilterField, filterPlayersButton,
+                filterVersionButton, serverListPlayersHeader, serverListNameHeader,
+                serverListMapHeader, serverListModeHeader, serverListPingHeader, serverListView,
+                serverListLoadingView, serverListErrorView
+            };
+            for (uint i = 0; i < serverElements.length; i++)
+                serverElements[i].Visible = showServers;
+            serverListView.Visible = showServers && serverListLoaded && serverListSuccess;
+            serverListLoadingView.Visible = showServers && serverListLoading;
+            serverListErrorView.Visible = showServers && serverListLoaded && !serverListSuccess;
+
+            spades::ui::UIElement @[] modElements = {
+                modsTitle, modsHelp, modsApplyHelp, modsStatus, modsListView, modsEmptyLabel,
+                disableModsButton, refreshModsButton
+            };
+            for (uint i = 0; i < modElements.length; i++)
+                modElements[i].Visible = modsPageVisible;
+
+            if (modsPageVisible)
+                modsEmptyLabel.Visible = modsListView.Model.NumRows == 0;
+            serversButton.Toggled = showServers;
+            modsButton.Toggled = modsPageVisible;
+        }
+
+        private void RefreshMods() {
+            string[] @mods = ui.helper.GetMods();
+            if (mods is null)
+                @mods = array<string>();
+            string activeMod = ui.helper.ActiveMod;
+            ModListModel model(Manager, mods, activeMod);
+            @model.ItemDoubleClicked = ModListItemEventHandler(this.ModListItemDoubleClicked);
+            @modsListView.Model = model;
+
+            disableModsButton.Enable = activeMod.length > 0;
+            if (activeMod.length > 0) {
+                modsStatus.Text = _Tr("MainScreen", "Enabled: {0}", activeMod);
+                modsStatus.TextColor = Vector4(1.f, 0.88f, 0.18f, 1.f);
+            } else {
+                modsStatus.Text = _Tr("MainScreen", "No mod is enabled.");
+                modsStatus.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
+            }
+            modsEmptyLabel.Visible = modsPageVisible && mods.length == 0;
+        }
+
+        private void ModListItemDoubleClicked(ModListModel @sender, string name) {
+            string error = ui.helper.SetActiveMod(name);
+            if (error.length > 0) {
+                AlertScreen alert(this, _Tr("MainScreen", "Failed to enable mod") + ":\n\n" + error);
+                alert.Run();
+            }
+            RefreshMods();
         }
 
         private string GetServerListSourceCaption() {
@@ -408,7 +527,7 @@ namespace spades {
             float navGap = 4.f;
             float navButtonWidth = navigationWidth - navInset * 2.f;
             spades::ui::UIElement @[] navButtons = {
-                serversButton, settingsButton, controlsButton, creditsButton, exitButton
+                serversButton, modsButton, settingsButton, controlsButton, creditsButton, exitButton
             };
             for (uint i = 0; i < navButtons.length; i++) {
                 navButtons[i].Bounds =
@@ -490,6 +609,25 @@ namespace spades {
             serverListLoadingView.Bounds = serverListView.Bounds;
             serverListErrorView.Bounds = serverListView.Bounds;
 
+            float modsX = contentX + 8.f;
+            float modsWidth = contentWidth - 16.f;
+            float modsTop = margin + contentInset + 4.f;
+            modsTitle.Bounds = AABB2(modsX, modsTop, modsWidth, 28.f);
+            modsHelp.Bounds = AABB2(modsX, modsTop + 29.f, modsWidth, 21.f);
+            modsApplyHelp.Bounds = AABB2(modsX, modsTop + 50.f, modsWidth, 21.f);
+            modsStatus.Bounds = AABB2(modsX, modsTop + 72.f, modsWidth, 26.f);
+            float modsButtonHeight = 30.f;
+            float modsBottom = margin + fullHeight - contentInset - modsButtonHeight;
+            float modsListY = modsTop + 102.f;
+            modsListView.Bounds =
+                AABB2(modsX, modsListY, modsWidth, Max(80.f, modsBottom - modsListY - 7.f));
+            modsEmptyLabel.Bounds = modsListView.Bounds;
+            float modsButtonWidth = Clamp(modsWidth * 0.24f, 105.f, 150.f);
+            disableModsButton.Bounds =
+                AABB2(modsX, modsBottom, modsButtonWidth, modsButtonHeight);
+            refreshModsButton.Bounds = AABB2(modsX + modsWidth - modsButtonWidth, modsBottom,
+                                              modsButtonWidth, modsButtonHeight);
+
             spades::ui::UIElement::OnResized();
         }
 
@@ -528,9 +666,28 @@ namespace spades {
         }
 
         private void ServersButtonPressed(spades::ui::UIElement @sender) {
-            serversButton.Toggled = true;
-            LoadServerList();
+            modsPageVisible = false;
+            UpdatePageVisibility();
+            if (!serverListLoaded && !serverListLoading)
+                LoadServerList();
         }
+
+        private void ModsButtonPressed(spades::ui::UIElement @sender) {
+            modsPageVisible = true;
+            RefreshMods();
+            UpdatePageVisibility();
+        }
+
+        private void DisableModsButtonPressed(spades::ui::UIElement @sender) {
+            string error = ui.helper.SetActiveMod("");
+            if (error.length > 0) {
+                AlertScreen alert(this, _Tr("MainScreen", "Failed to disable mod") + ":\n\n" + error);
+                alert.Run();
+            }
+            RefreshMods();
+        }
+
+        private void RefreshModsButtonPressed(spades::ui::UIElement @sender) { RefreshMods(); }
 
         private void RefreshButtonPressed(spades::ui::UIElement @sender) { LoadServerList(); }
 
@@ -680,7 +837,7 @@ namespace spades {
             serverListLoading = true;
             serverListSuccess = false;
             @serverListView.Model = spades::ui::ListViewModel();
-            serverListLoadingView.Visible = true;
+            serverListLoadingView.Visible = !modsPageVisible;
             serverListErrorView.Visible = false;
             serverListView.Visible = false;
             serverListSourceButton.Enable = false;
@@ -702,10 +859,10 @@ namespace spades {
                 serverListSuccess = false;
                 serverListView.Visible = false;
                 serverListLoadingView.Visible = false;
-                serverListErrorView.Visible = true;
+                serverListErrorView.Visible = !modsPageVisible;
             } else {
                 serverListSuccess = true;
-                serverListView.Visible = true;
+                serverListView.Visible = !modsPageVisible;
                 serverListLoadingView.Visible = false;
                 serverListErrorView.Visible = false;
                 UpdateServerList();
@@ -713,7 +870,7 @@ namespace spades {
         }
 
         void HotKey(string key) {
-            if (IsEnabled && key == "Enter")
+            if (IsEnabled && key == "Enter" && !modsPageVisible)
                 ConnectButtonPressed(connectButton);
             else if (IsEnabled && key == "Escape")
                 ExitButtonPressed(exitButton);

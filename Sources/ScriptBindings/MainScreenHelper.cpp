@@ -92,6 +92,21 @@ namespace spades {
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "array<string>@ GetMods()",
+												  asMETHOD(gui::MainScreenHelper, GetMods),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "string get_ActiveMod()",
+												  asMETHOD(gui::MainScreenHelper, GetActiveMod),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "string SetActiveMod(string)",
+												  asMETHOD(gui::MainScreenHelper, SetActiveMod),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
 												  "string get_Credits()",
 												  asMETHOD(gui::MainScreenHelper, GetCredits),
 												  asCALL_THISCALL);

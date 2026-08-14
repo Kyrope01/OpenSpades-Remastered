@@ -20,13 +20,21 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace spades {
-    class ServerAddress;
+	class ServerAddress;
 
 	/** The path to the user resource directory. Can be empty. */
 	extern std::string g_userResourceDirectory;
 
-    void StartClient(const ServerAddress &, const std::string &playerName);
-    void StartMainScreen();
+	/** Returns supported package archives directly inside the user resource directory. */
+	std::vector<std::string> GetAvailableUserMods();
+	/** Returns the user mod package mounted for the current process, or an empty string. */
+	std::string GetActiveUserMod();
+	/** Mounts and persists a mod, or disables mods when name is empty. Returns an error string. */
+	std::string SetActiveUserMod(const std::string &name);
+
+	void StartClient(const ServerAddress &, const std::string &playerName);
+	void StartMainScreen();
 }

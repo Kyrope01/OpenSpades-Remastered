@@ -27,6 +27,7 @@
 #include <curl/curl.h>
 #include <json/json.h>
 
+#include "Main.h"
 #include "MainScreen.h"
 #include "MainScreenHelper.h"
 #include <Core/FileManager.h>
@@ -386,6 +387,24 @@ namespace spades {
 			std::string s = errorMessage;
 			errorMessage.clear();
 			return s;
+		}
+
+		CScriptArray *MainScreenHelper::GetMods() {
+			std::vector<std::string> mods = GetAvailableUserMods();
+			asIScriptEngine *engine = ScriptManager::GetInstance()->GetEngine();
+			asITypeInfo *arrayType = engine->GetTypeInfoByDecl("array<string>");
+			SPAssert(arrayType != nullptr);
+			CScriptArray *array =
+			  CScriptArray::Create(arrayType, static_cast<asUINT>(mods.size()));
+			for (size_t i = 0; i < mods.size(); ++i)
+				array->SetValue(static_cast<asUINT>(i), &mods[i]);
+			return array;
+		}
+
+		std::string MainScreenHelper::GetActiveMod() { return GetActiveUserMod(); }
+
+		std::string MainScreenHelper::SetActiveMod(std::string name) {
+			return SetActiveUserMod(name);
 		}
 
 		PackageUpdateManager &MainScreenHelper::GetPackageUpdateManager() {

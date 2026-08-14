@@ -31,12 +31,18 @@ namespace spades {
 
 	public:
 		static IStream *OpenForReading(const char *);
+		/** Opens a file while ignoring one registered filesystem. */
+		static IStream *OpenForReadingExcluding(const char *, const IFileSystem *);
 		static IStream *OpenForWriting(const char *);
 		static bool FileExists(const char *);
 		static void AddFileSystem(IFileSystem *);
 		static void AppendFileSystem(IFileSystem *);
 		static void PrependFileSystem(IFileSystem *);
+		/** Removes and destroys a previously registered filesystem. */
+		static bool RemoveFileSystem(IFileSystem *);
 		static std::vector<std::string> EnumFiles(const char *);
+		/** Enumerates files while ignoring one registered filesystem. */
+		static std::vector<std::string> EnumFilesExcluding(const char *, const IFileSystem *);
 		static std::string ReadAllBytes(const char *);
 		static void Close();
 	};
