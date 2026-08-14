@@ -229,6 +229,11 @@ namespace spades {
 			time = 0.f;
 			viewWeaponOffset = MakeVector3(0, 0, 0);
 			lastFront = MakeVector3(0, 0, 0);
+			thirdPersonAnimationVelocity = p->GetVelocity();
+			previousAnimationOrigin = p->GetOrigin();
+			thirdPersonWalkProgress = p->GetWalkAnimationProgress();
+			animationMotionSampleTime = 0.f;
+			hasPreviousAnimationOrigin = true;
 			flashlightOrientation = p->GetFront();
 
 			ScriptContextHandle ctx;
@@ -328,8 +333,81 @@ namespace spades {
 			return localFireVibration;
 		}
 
+		void ClientPlayer::UpdateThirdPersonAnimation(float dt) {
+			Vector3 origin = player->GetOrigin();
+
+			// The local player has a continuously simulated velocity and walk phase. Keep
+			// using those values so first-person movement remains exactly as before.
+			if (player->IsLocalPlayer()) {
+				thirdPersonAnimationVelocity = player->GetVelocity();
+				thirdPersonWalkProgress = player->GetWalkAnimationProgress();
+				previousAnimationOrigin = origin;
+				animationMotionSampleTime = 0.f;
+				hasPreviousAnimationOrigin = true;
+				return;
+			}
+
+			if (!hasPreviousAnimationOrigin) {
+				previousAnimationOrigin = origin;
+				hasPreviousAnimationOrigin = true;
+				return;
+			}
+
+			if (dt <= 0.f)
+				return;
+
+			animationMotionSampleTime += dt;
+			Vector3 displacement = origin - previousAnimationOrigin;
+			previousAnimationOrigin = origin;
+			displacement.z = 0.f;
+			float distanceSquared = displacement.GetPoweredLength();
+
+			// Ignore spawn corrections, teleports, and map-wrap jumps. They are not
+			// walking and would otherwise create one extremely large leg swing.
+			if (distanceSquared > 4.f) {
+				thirdPersonAnimationVelocity = MakeVector3(0.f, 0.f, 0.f);
+				animationMotionSampleTime = 0.f;
+				return;
+			}
+
+			if (distanceSquared > 1.e-8f) {
+				float sampleTime = std::max(animationMotionSampleTime, 1.f / 240.f);
+				Vector3 observedVelocity = displacement / (sampleTime * 32.f);
+
+				// Reject malformed network samples without suppressing normal sprinting.
+				float observedSpeed = observedVelocity.GetLength();
+				if (observedSpeed > 1.f)
+					observedVelocity *= 1.f / observedSpeed;
+
+				// Network snapshots arrive less frequently than rendered frames. Retaining
+				// and smoothing their velocity prevents a walk/idle flicker between packets.
+				thirdPersonAnimationVelocity =
+				  Mix(thirdPersonAnimationVelocity, observedVelocity, .5f);
+				animationMotionSampleTime = 0.f;
+			} else if (animationMotionSampleTime > .2f) {
+				// Stop naturally after the final snapshot instead of holding the last pose.
+				thirdPersonAnimationVelocity *= powf(.02f, dt);
+			}
+
+			PlayerInput input = player->GetInput();
+			float verticalVelocity = player->GetVelocity().z;
+			if (verticalVelocity >= 0.f && verticalVelocity < .017f && !input.sneak &&
+			    !input.crouch &&
+			    !(player->GetWeaponInput().secondary && player->IsToolWeapon())) {
+				Vector3 horizontalVelocity = thirdPersonAnimationVelocity;
+				horizontalVelocity.z = 0.f;
+				// Match Player::MovePlayer: world displacement is velocity * 32,
+				// moveDistance advances by 0.3, and GetWalkAnimationProgress applies 0.5.
+				// Integrating the retained velocity also keeps the cycle smooth between
+				// relatively infrequent network snapshots.
+				thirdPersonWalkProgress += horizontalVelocity.GetLength() * dt * 4.8f;
+				thirdPersonWalkProgress = fmodf(thirdPersonWalkProgress, 1.f);
+			}
+		}
+
 		void ClientPlayer::Update(float dt) {
 			time += dt;
+			UpdateThirdPersonAnimation(dt);
 
 			PlayerInput actualInput = player->GetInput();
 			WeaponInput actualWeapInput = player->GetWeaponInput();
@@ -890,6 +968,8 @@ namespace spades {
 			scaler = scaler * Matrix4::Scale(-1, -1, 1);
 
 			PlayerInput inp = p->GetInput();
+			const float walkProgress = thirdPersonWalkProgress;
+			const Vector3 walkVelocity = thirdPersonAnimationVelocity;
 
 			// lower
 			Matrix4 torso, head, arms;
@@ -897,12 +977,12 @@ namespace spades {
 				Matrix4 leg1 = Matrix4::Translate(-0.25f, 0.2f, -0.1f);
 				Matrix4 leg2 = Matrix4::Translate(0.25f, 0.2f, -0.1f);
 
-				float ang = sinf(p->GetWalkAnimationProgress() * M_PI * 2.f) * 0.6f;
-				float walkVel = Vector3::Dot(p->GetVelocity(), p->GetFront2D()) * 4.f;
+				float ang = sinf(walkProgress * M_PI * 2.f) * 0.6f;
+				float walkVel = Vector3::Dot(walkVelocity, p->GetFront2D()) * 4.f;
 				leg1 = leg1 * Matrix4::Rotate(MakeVector3(1, 0, 0), ang * walkVel);
 				leg2 = leg2 * Matrix4::Rotate(MakeVector3(1, 0, 0), -ang * walkVel);
 
-				walkVel = Vector3::Dot(p->GetVelocity(), p->GetRight()) * 3.f;
+				walkVel = Vector3::Dot(walkVelocity, p->GetRight()) * 3.f;
 				leg1 = leg1 * Matrix4::Rotate(MakeVector3(0, 1, 0), ang * walkVel);
 				leg2 = leg2 * Matrix4::Rotate(MakeVector3(0, 1, 0), -ang * walkVel);
 
@@ -931,12 +1011,12 @@ namespace spades {
 				Matrix4 leg1 = Matrix4::Translate(-0.25f, 0.f, -0.1f);
 				Matrix4 leg2 = Matrix4::Translate(0.25f, 0.f, -0.1f);
 
-				float ang = sinf(p->GetWalkAnimationProgress() * M_PI * 2.f) * 0.6f;
-				float walkVel = Vector3::Dot(p->GetVelocity(), p->GetFront2D()) * 4.f;
+				float ang = sinf(walkProgress * M_PI * 2.f) * 0.6f;
+				float walkVel = Vector3::Dot(walkVelocity, p->GetFront2D()) * 4.f;
 				leg1 = leg1 * Matrix4::Rotate(MakeVector3(1, 0, 0), ang * walkVel);
 				leg2 = leg2 * Matrix4::Rotate(MakeVector3(1, 0, 0), -ang * walkVel);
 
-				walkVel = Vector3::Dot(p->GetVelocity(), p->GetRight()) * 3.f;
+				walkVel = Vector3::Dot(walkVelocity, p->GetRight()) * 3.f;
 				leg1 = leg1 * Matrix4::Rotate(MakeVector3(0, 1, 0), ang * walkVel);
 				leg2 = leg2 * Matrix4::Rotate(MakeVector3(0, 1, 0), -ang * walkVel);
 

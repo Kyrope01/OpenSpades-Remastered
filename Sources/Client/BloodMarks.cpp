@@ -589,6 +589,10 @@ namespace spades {
 
 			ModelRenderParam param;
 			param.customColor = Vector3{0.7F, 0.07F, 0.01F}; // hemoglobin
+			// These are flat terrain stains, not freestanding geometry. Submitting dozens
+			// of tiny marks to the sparse model-shadow pass costs far more than their
+			// imperceptible shadows are worth (especially during sustained combat).
+			param.castShadow = false;
 
 			for (auto& slot : impl.marks) {
 				if (slot) {

@@ -62,6 +62,15 @@ namespace spades {
 
 			Vector3 lastFront;
 
+			// Remote players are periodically snapped to authoritative network positions.
+			// Keep a render-only motion estimate so those corrections cannot leave the
+			// third-person walk cycle with a zero/stale physics velocity.
+			Vector3 thirdPersonAnimationVelocity;
+			Vector3 previousAnimationOrigin;
+			float thirdPersonWalkProgress;
+			float animationMotionSampleTime;
+			bool hasPreviousAnimationOrigin;
+
 			Vector3 flashlightOrientation;
 
 			asIScriptObject *spadeSkin;
@@ -87,6 +96,7 @@ namespace spades {
 			AmbienceInfo ComputeAmbience();
 
 			float GetLocalFireVibration();
+			void UpdateThirdPersonAnimation(float dt);
 
 			bool ShouldRenderInThirdPersonView();
 
