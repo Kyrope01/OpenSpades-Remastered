@@ -30,9 +30,11 @@ namespace spades {
 
 	/** Returns supported package archives directly inside the user resource directory. */
 	std::vector<std::string> GetAvailableUserMods();
-	/** Returns the user mod package mounted for the current process, or an empty string. */
+	/** Returns the mod selected for the next launch, or an empty string. */
 	std::string GetActiveUserMod();
-	/** Mounts and persists a mod, or disables mods when name is empty. Returns an error string. */
+	/** Returns the user mod loaded during this process's startup, or an empty string. */
+	std::string GetLoadedUserMod();
+	/** Validates and persists a mod selection, or disables mods when name is empty. */
 	std::string SetActiveUserMod(const std::string &name);
 
 	void StartClient(const ServerAddress &, const std::string &playerName);

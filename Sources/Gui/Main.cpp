@@ -228,8 +228,7 @@ namespace {
 
 namespace {
 	spades::DirectoryFileSystem *g_userResourceFileSystem = nullptr;
-	spades::ZipFileSystem *g_activeUserModFileSystem = nullptr;
-	std::string g_activeUserMod;
+	std::string g_loadedUserMod;
 
 	bool IsPackageArchiveName(const std::string &name) {
 		if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
@@ -267,54 +266,70 @@ namespace spades {
 		return mods;
 	}
 
-	std::string GetActiveUserMod() { return g_activeUserMod; }
+	namespace {
+		std::string ValidateUserModName(const std::string &name) {
+			const std::vector<std::string> mods = GetAvailableUserMods();
+			if (std::find(mods.begin(), mods.end(), name) == mods.end())
+				return "The selected mod is no longer present in the user Resources directory.";
+			return std::string();
+		}
+
+		std::unique_ptr<ZipFileSystem> OpenUserModArchive(const std::string &name) {
+			DirectoryFileSystem userFiles(g_userResourceDirectory, false);
+			std::unique_ptr<IStream> stream(userFiles.OpenForReading(name.c_str()));
+			std::unique_ptr<ZipFileSystem> fileSystem(new ZipFileSystem(stream.get()));
+			stream.release(); // ZipFileSystem owns it after successful construction.
+			return fileSystem;
+		}
+	} // namespace
+
+	std::string GetActiveUserMod() { return std::string(cl_activeMod); }
+
+	std::string GetLoadedUserMod() { return g_loadedUserMod; }
 
 	std::string SetActiveUserMod(const std::string &name) {
 		if (name.empty()) {
-			if (g_activeUserModFileSystem) {
-				FileManager::RemoveFileSystem(g_activeUserModFileSystem);
-				g_activeUserModFileSystem = nullptr;
-			}
-			g_activeUserMod.clear();
 			cl_activeMod = std::string();
 			Settings::GetInstance()->Flush();
-			SPLog("User mods disabled");
+			SPLog("User mods will be disabled on the next launch");
 			return std::string();
 		}
 
-		const std::vector<std::string> mods = GetAvailableUserMods();
-		if (std::find(mods.begin(), mods.end(), name) == mods.end())
-			return "The selected mod is no longer present in the user Resources directory.";
+		std::string error = ValidateUserModName(name);
+		if (!error.empty())
+			return error;
 
-		if (name == g_activeUserMod && g_activeUserModFileSystem) {
-			cl_activeMod = name;
-			Settings::GetInstance()->Flush();
-			return std::string();
-		}
-
-		DirectoryFileSystem userFiles(g_userResourceDirectory, false);
-		std::unique_ptr<ZipFileSystem> newFileSystem;
+		// Construct the filesystem now to reject corrupt or unsupported archives, but do not
+		// change the live resource stack. Scripts, renderer/audio caches, and models can retain
+		// resources from the old stack; replacing it in-process creates mixed assets and can
+		// invalidate streams. Startup mounts the selection before any of those systems exist.
 		try {
-			std::unique_ptr<IStream> stream(userFiles.OpenForReading(name.c_str()));
-			newFileSystem.reset(new ZipFileSystem(stream.get()));
-			stream.release(); // ZipFileSystem owns it after successful construction.
+			OpenUserModArchive(name);
 		} catch (const std::exception &ex) {
 			return Format("Unable to load mod '{0}': {1}", name, ex.what());
 		}
 
-		// Validate the replacement before disturbing the currently mounted package. The selected
-		// mod is prepended so its files override both built-in packages and loose resources.
-		ZipFileSystem *mountedFileSystem = newFileSystem.get();
-		FileManager::PrependFileSystem(mountedFileSystem);
-		newFileSystem.release();
-		if (g_activeUserModFileSystem)
-			FileManager::RemoveFileSystem(g_activeUserModFileSystem);
-		g_activeUserModFileSystem = mountedFileSystem;
-		g_activeUserMod = name;
 		cl_activeMod = name;
 		Settings::GetInstance()->Flush();
-		SPLog("User mod enabled: %s", name.c_str());
+		SPLog("User mod selected for next launch: %s", name.c_str());
 		return std::string();
+	}
+
+	std::string MountUserModForStartup(const std::string &name) {
+		std::string error = ValidateUserModName(name);
+		if (!error.empty())
+			return error;
+
+		try {
+			std::unique_ptr<ZipFileSystem> fileSystem = OpenUserModArchive(name);
+			FileManager::PrependFileSystem(fileSystem.get());
+			fileSystem.release();
+			g_loadedUserMod = name;
+			SPLog("User mod enabled during startup: %s", name.c_str());
+			return std::string();
+		} catch (const std::exception &ex) {
+			return Format("Unable to load mod '{0}': {1}", name, ex.what());
+		}
 	}
 
 	void StartClient(const spades::ServerAddress &addr) {
@@ -674,7 +689,7 @@ int main(int argc, char **argv) {
 
 			std::string requestedMod = cl_activeMod;
 			if (!requestedMod.empty()) {
-				std::string error = spades::SetActiveUserMod(requestedMod);
+				std::string error = spades::MountUserModForStartup(requestedMod);
 				if (!error.empty()) {
 					SPLog("Failed to enable configured user mod '%s': %s", requestedMod.c_str(),
 					      error.c_str());

@@ -106,6 +106,7 @@ namespace spades {
 
 			CScriptArray *GetMods();
 			std::string GetActiveMod();
+			std::string GetLoadedMod();
 			std::string SetActiveMod(std::string name);
 
 			std::string GetCredits();

@@ -403,6 +403,8 @@ namespace spades {
 
 		std::string MainScreenHelper::GetActiveMod() { return GetActiveUserMod(); }
 
+		std::string MainScreenHelper::GetLoadedMod() { return GetLoadedUserMod(); }
+
 		std::string MainScreenHelper::SetActiveMod(std::string name) {
 			return SetActiveUserMod(name);
 		}

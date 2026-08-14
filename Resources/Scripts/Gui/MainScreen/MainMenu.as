@@ -66,8 +66,41 @@ namespace spades {
                     return;
                 }
                 index = Clamp(value, 0, int(items.length) - 1);
-                Caption = items[index] + "  v";
+                Caption = items[index];
             }
+        }
+
+        void Render() {
+            Renderer @renderer = Manager.Renderer;
+            Vector2 pos = ScreenPosition;
+            Vector2 size = Size;
+            Image @white = renderer.RegisterImage("Gfx/White.tga");
+            if ((Pressed && Hover) || Toggled)
+                renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.20f);
+            else if (Hover)
+                renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.12f);
+            else
+                renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.07f);
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
+
+            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, Hover ? 0.10f : 0.05f);
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
+            renderer.DrawImage(white, AABB2(pos.x, pos.y, 1.f, size.y));
+            renderer.DrawImage(white, AABB2(pos.x + size.x - 1.f, pos.y, 1.f, size.y));
+
+            float textAreaWidth = Max(1.f, size.x - 28.f);
+            Vector2 textSize = Font.Measure(Caption);
+            float scale = textSize.x > textAreaWidth ? textAreaWidth / textSize.x : 1.f;
+            Vector2 scaledSize = textSize * scale;
+            Font.DrawShadow(Caption,
+                            pos + Vector2(5.f, (size.y - scaledSize.y) * 0.5f), scale,
+                            Vector4(1.f, 1.f, 1.f, 1.f), Vector4(0.f, 0.f, 0.f, 0.4f));
+
+            Image @arrow = renderer.RegisterImage("Gfx/UI/ScrollArrow.png");
+            renderer.ColorNP = Vector4(1.f, 1.f, 1.f, 0.9f);
+            float arrowY = pos.y + (size.y + 16.f) * 0.5f;
+            renderer.DrawImage(arrow, AABB2(pos.x + size.x - 19.f, arrowY, 16.f, -16.f));
         }
 
         void OnActivated() {
@@ -381,7 +414,7 @@ namespace spades {
 
             @modsApplyHelp = spades::ui::Label(Manager);
             modsApplyHelp.Text =
-                _Tr("MainScreen", "Newly loaded files change now; restart fully applies scripts, localization, and cached files.");
+                _Tr("MainScreen", "Restart after changing mods so scripts, models, sounds, and cached resources load together safely.");
             modsApplyHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
             modsApplyHelp.Alignment = Vector2(0.f, 0.5f);
             AddChild(modsApplyHelp);
@@ -464,15 +497,23 @@ namespace spades {
             string[] @mods = ui.helper.GetMods();
             if (mods is null)
                 @mods = array<string>();
-            string activeMod = ui.helper.ActiveMod;
-            ModListModel model(Manager, mods, activeMod);
+            string selectedMod = ui.helper.ActiveMod;
+            string loadedMod = ui.helper.LoadedMod;
+            ModListModel model(Manager, mods, selectedMod, loadedMod);
             @model.ItemDoubleClicked = ModListItemEventHandler(this.ModListItemDoubleClicked);
             @modsListView.Model = model;
 
-            disableModsButton.Enable = activeMod.length > 0;
-            if (activeMod.length > 0) {
-                modsStatus.Text = _Tr("MainScreen", "Enabled: {0}", activeMod);
+            disableModsButton.Enable = selectedMod.length > 0;
+            if (selectedMod.length > 0 && selectedMod == loadedMod) {
+                modsStatus.Text = _Tr("MainScreen", "Enabled: {0}", loadedMod);
                 modsStatus.TextColor = Vector4(1.f, 0.88f, 0.18f, 1.f);
+            } else if (selectedMod.length > 0) {
+                modsStatus.Text =
+                    _Tr("MainScreen", "Selected: {0} - restart required", selectedMod);
+                modsStatus.TextColor = Vector4(1.f, 0.72f, 0.16f, 1.f);
+            } else if (loadedMod.length > 0) {
+                modsStatus.Text = _Tr("MainScreen", "Restart to disable: {0}", loadedMod);
+                modsStatus.TextColor = Vector4(1.f, 0.72f, 0.16f, 1.f);
             } else {
                 modsStatus.Text = _Tr("MainScreen", "No mod is enabled.");
                 modsStatus.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
@@ -484,6 +525,11 @@ namespace spades {
             string error = ui.helper.SetActiveMod(name);
             if (error.length > 0) {
                 AlertScreen alert(this, _Tr("MainScreen", "Failed to enable mod") + ":\n\n" + error);
+                alert.Run();
+            } else if (name != ui.helper.LoadedMod) {
+                AlertScreen alert(
+                    this, _Tr("MainScreen", "Mod selected") + ":\n\n" +
+                              _Tr("MainScreen", "Restart OpenSpades before joining a game so all mod scripts, models, sounds, and cached resources load together."));
                 alert.Run();
             }
             RefreshMods();
@@ -679,9 +725,15 @@ namespace spades {
         }
 
         private void DisableModsButtonPressed(spades::ui::UIElement @sender) {
+            bool restartRequired = ui.helper.LoadedMod.length > 0;
             string error = ui.helper.SetActiveMod("");
             if (error.length > 0) {
                 AlertScreen alert(this, _Tr("MainScreen", "Failed to disable mod") + ":\n\n" + error);
+                alert.Run();
+            } else if (restartRequired) {
+                AlertScreen alert(
+                    this, _Tr("MainScreen", "Mod disabled") + ":\n\n" +
+                              _Tr("MainScreen", "Restart OpenSpades to finish disabling the currently loaded mod."));
                 alert.Run();
             }
             RefreshMods();

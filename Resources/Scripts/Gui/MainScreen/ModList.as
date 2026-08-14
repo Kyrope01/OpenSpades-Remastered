@@ -22,12 +22,14 @@ namespace spades {
 
     class ModListItem : spades::ui::ButtonBase {
         string Name;
-        bool Enabled;
+        bool Selected;
+        bool Loaded;
 
-        ModListItem(spades::ui::UIManager @manager, string name, bool enabled) {
+        ModListItem(spades::ui::UIManager @manager, string name, bool selected, bool loaded) {
             super(manager);
             Name = name;
-            Enabled = enabled;
+            Selected = selected;
+            Loaded = loaded;
         }
 
         private string FitText(string text, float width) {
@@ -51,9 +53,12 @@ namespace spades {
 
             Vector4 background = Vector4(1.f, 1.f, 1.f, 0.025f);
             Vector4 foreground = Vector4(0.94f, 0.94f, 0.94f, 1.f);
-            if (Enabled) {
+            if (Selected) {
                 background = Vector4(0.52f, 0.40f, 0.04f, 0.42f);
                 foreground = Vector4(1.f, 0.88f, 0.18f, 1.f);
+            } else if (Loaded) {
+                background = Vector4(0.38f, 0.30f, 0.05f, 0.30f);
+                foreground = Vector4(0.94f, 0.78f, 0.22f, 1.f);
             }
             if (Pressed && Hover)
                 background.w += 0.30f;
@@ -62,16 +67,22 @@ namespace spades {
 
             renderer.ColorNP = background;
             renderer.DrawImage(white, AABB2(pos.x, pos.y, size.x, size.y));
-            renderer.ColorNP = Enabled ? Vector4(1.f, 0.82f, 0.10f, 0.42f)
-                                       : Vector4(1.f, 1.f, 1.f, 0.05f);
+            renderer.ColorNP = (Selected || Loaded) ? Vector4(1.f, 0.82f, 0.10f, 0.42f)
+                                                    : Vector4(1.f, 1.f, 1.f, 0.05f);
             renderer.DrawImage(white, AABB2(pos.x, pos.y + size.y - 1.f, size.x, 1.f));
 
-            string state = Enabled ? _Tr("MainScreen", "Enabled") : "";
-            float stateWidth = Enabled ? Font.Measure(state).x + 22.f : 8.f;
+            string state = "";
+            if (Selected && Loaded)
+                state = _Tr("MainScreen", "Enabled");
+            else if (Selected)
+                state = _Tr("MainScreen", "Selected - restart required");
+            else if (Loaded)
+                state = _Tr("MainScreen", "Currently loaded");
+            float stateWidth = state.length > 0 ? Font.Measure(state).x + 22.f : 8.f;
             string caption = FitText(Name, Max(1.f, size.x - stateWidth - 20.f));
             Font.Draw(caption, pos + Vector2(10.f, (size.y - Font.Measure(caption).y) * 0.5f),
                       1.f, foreground);
-            if (Enabled) {
+            if (state.length > 0) {
                 Vector2 stateSize = Font.Measure(state);
                 Font.Draw(state,
                           pos + Vector2(size.x - stateSize.x - 10.f,
@@ -86,14 +97,17 @@ namespace spades {
     class ModListModel : spades::ui::ListViewModel {
         private spades::ui::UIManager @manager;
         private string[] mods;
-        private string activeMod;
+        private string selectedMod;
+        private string loadedMod;
 
         ModListItemEventHandler @ItemDoubleClicked;
 
-        ModListModel(spades::ui::UIManager @manager, string[] @mods, string activeMod) {
+        ModListModel(spades::ui::UIManager @manager, string[] @mods, string selectedMod,
+                     string loadedMod) {
             @this.manager = manager;
             this.mods = mods;
-            this.activeMod = activeMod;
+            this.selectedMod = selectedMod;
+            this.loadedMod = loadedMod;
         }
 
         int NumRows {
@@ -107,7 +121,8 @@ namespace spades {
         }
 
         spades::ui::UIElement @CreateElement(int row) {
-            ModListItem item(manager, mods[row], mods[row] == activeMod);
+            ModListItem item(manager, mods[row], mods[row] == selectedMod,
+                             mods[row] == loadedMod);
             @item.DoubleClicked = spades::ui::EventHandler(this.OnItemDoubleClicked);
             return item;
         }
