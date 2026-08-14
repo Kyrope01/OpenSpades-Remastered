@@ -414,7 +414,7 @@ namespace spades {
 
             @modsApplyHelp = spades::ui::Label(Manager);
             modsApplyHelp.Text =
-                _Tr("MainScreen", "Restart after changing mods so scripts, models, sounds, and cached resources load together safely.");
+                _Tr("MainScreen", "OpenSpades restarts automatically after a mod change so every resource loads together safely.");
             modsApplyHelp.TextColor = Vector4(0.78f, 0.78f, 0.78f, 1.f);
             modsApplyHelp.Alignment = Vector2(0.f, 0.5f);
             AddChild(modsApplyHelp);
@@ -503,7 +503,7 @@ namespace spades {
             @model.ItemDoubleClicked = ModListItemEventHandler(this.ModListItemDoubleClicked);
             @modsListView.Model = model;
 
-            disableModsButton.Enable = selectedMod.length > 0;
+            disableModsButton.Enable = selectedMod.length > 0 || loadedMod.length > 0;
             if (selectedMod.length > 0 && selectedMod == loadedMod) {
                 modsStatus.Text = _Tr("MainScreen", "Enabled: {0}", loadedMod);
                 modsStatus.TextColor = Vector4(1.f, 0.88f, 0.18f, 1.f);
@@ -527,10 +527,8 @@ namespace spades {
                 AlertScreen alert(this, _Tr("MainScreen", "Failed to enable mod") + ":\n\n" + error);
                 alert.Run();
             } else if (name != ui.helper.LoadedMod) {
-                AlertScreen alert(
-                    this, _Tr("MainScreen", "Mod selected") + ":\n\n" +
-                              _Tr("MainScreen", "Restart OpenSpades before joining a game so all mod scripts, models, sounds, and cached resources load together."));
-                alert.Run();
+                ui.helper.RestartForModChange();
+                return;
             }
             RefreshMods();
         }
@@ -731,10 +729,8 @@ namespace spades {
                 AlertScreen alert(this, _Tr("MainScreen", "Failed to disable mod") + ":\n\n" + error);
                 alert.Run();
             } else if (restartRequired) {
-                AlertScreen alert(
-                    this, _Tr("MainScreen", "Mod disabled") + ":\n\n" +
-                              _Tr("MainScreen", "Restart OpenSpades to finish disabling the currently loaded mod."));
-                alert.Run();
+                ui.helper.RestartForModChange();
+                return;
             }
             RefreshMods();
         }

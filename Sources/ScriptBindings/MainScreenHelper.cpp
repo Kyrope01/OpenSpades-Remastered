@@ -112,6 +112,11 @@ namespace spades {
 												  asCALL_THISCALL);
 					manager->CheckError(r);
 					r = eng->RegisterObjectMethod("MainScreenHelper",
+												  "void RestartForModChange()",
+												  asMETHOD(gui::MainScreenHelper, RestartForModChange),
+												  asCALL_THISCALL);
+					manager->CheckError(r);
+					r = eng->RegisterObjectMethod("MainScreenHelper",
 												  "string get_Credits()",
 												  asMETHOD(gui::MainScreenHelper, GetCredits),
 												  asCALL_THISCALL);

@@ -40,6 +40,7 @@ namespace spades {
 			Handle<View> subview;
 			Handle<client::FontManager> fontManager;
 			float timeToStartInitialization;
+			bool closeRequested;
 
 			Handle<MainScreenHelper> helper;
 			Handle<asIScriptObject> ui;
@@ -73,6 +74,7 @@ namespace spades {
 			void RunFrameLate(float dt) override;
 
 			void Closing() override;
+			void RequestRestart();
 			bool WantsToBeClosed() override;
 
 			bool ExecCommand(const Handle<ConsoleCommand> &) override;

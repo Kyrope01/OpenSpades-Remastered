@@ -108,6 +108,7 @@ namespace spades {
 			std::string GetActiveMod();
 			std::string GetLoadedMod();
 			std::string SetActiveMod(std::string name);
+			void RestartForModChange();
 
 			std::string GetCredits();
 

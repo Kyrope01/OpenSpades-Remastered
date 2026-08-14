@@ -36,6 +36,8 @@ namespace spades {
 	std::string GetLoadedUserMod();
 	/** Validates and persists a mod selection, or disables mods when name is empty. */
 	std::string SetActiveUserMod(const std::string &name);
+	/** Requests a clean process relaunch after the current main-screen runner closes. */
+	void RequestApplicationRestart();
 
 	void StartClient(const ServerAddress &, const std::string &playerName);
 	void StartMainScreen();

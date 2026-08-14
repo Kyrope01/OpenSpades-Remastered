@@ -18,6 +18,7 @@
 
  */
 
+#include "Main.h"
 #include "MainScreen.h"
 #include "MainScreenHelper.h"
 #include <Client/Client.h>
@@ -31,7 +32,7 @@ namespace spades {
 	namespace gui {
 		MainScreen::MainScreen(client::IRenderer *r, client::IAudioDevice *a,
 		                       client::FontManager *fontManager)
-		    : renderer(r), audioDevice(a), fontManager(fontManager) {
+		    : renderer(r), audioDevice(a), fontManager(fontManager), closeRequested(false) {
 			SPADES_MARK_FUNCTION();
 			if (r == NULL)
 				SPInvalidArgument("r");
@@ -195,8 +196,16 @@ namespace spades {
 			return *reinterpret_cast<AABB2 *>(c->GetReturnObject());
 		}
 
+		void MainScreen::RequestRestart() {
+			RequestApplicationRestart();
+			closeRequested = true;
+		}
+
 		bool MainScreen::WantsToBeClosed() {
 			SPADES_MARK_FUNCTION();
+			if (closeRequested) {
+				return true;
+			}
 			if (!ui) {
 				return false;
 			}

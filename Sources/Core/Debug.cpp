@@ -206,6 +206,11 @@ namespace spades {
 		accumlatedLog.clear();
 	}
 
+	void CloseLog() {
+		delete logStream;
+		logStream = nullptr;
+	}
+
 	void GetBufferedLogLines(stmp::dyn_function<void(std::string)> &&cb) {
 		BoundedLogBuffer tmp;
 

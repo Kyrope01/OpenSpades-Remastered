@@ -19,13 +19,20 @@
  */
 
 #include <algorithm> //std::sort
+#include <cerrno>
 #include <cctype>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <regex>
+#include <vector>
 
 #if (!defined(__APPLE__) && (__unix || __unix__)) || defined(__HAIKU__)
 #include <sys/stat.h>
 #include <sys/types.h>
+#endif
+#ifndef WIN32
+#include <unistd.h>
 #endif
 
 #include <Imports/SDL.h>
@@ -187,6 +194,8 @@ namespace {
 
 	bool g_printVersion = false;
 	bool g_printHelp = false;
+	bool g_modRestartLaunch = false;
+	bool g_restartRequested = false;
 
 	void printHelp(char *binaryName) {
 		printf("usage: %s [server_address] [v=protocol_version] [-h|--help] [-v|--version] \n",
@@ -220,9 +229,62 @@ namespace {
 				g_printHelp = true;
 				return ++i;
 			}
+			if (!strcasecmp(a, "--mod-restart")) {
+				g_modRestartLaunch = true;
+				return ++i;
+			}
 		}
 
 		return 0;
+	}
+
+	bool RelaunchApplication(int argc, char **argv, std::string &error) {
+#ifdef WIN32
+		(void)argc;
+		(void)argv;
+		std::vector<wchar_t> executablePath(32768);
+		DWORD executablePathCapacity = static_cast<DWORD>(executablePath.size());
+		DWORD executablePathLength =
+		  GetModuleFileNameW(nullptr, executablePath.data(), executablePathCapacity);
+		if (executablePathLength == 0 || executablePathLength >= executablePathCapacity) {
+			error = spades::Format("GetModuleFileNameW failed with error {0}", GetLastError());
+			return false;
+		}
+
+		std::wstring commandLine(GetCommandLineW());
+		if (!g_modRestartLaunch)
+			commandLine += L" --mod-restart";
+
+		std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+		mutableCommandLine.push_back(L'\0');
+
+		STARTUPINFOW startupInfo = {};
+		startupInfo.cb = sizeof(startupInfo);
+		PROCESS_INFORMATION processInfo = {};
+		if (!CreateProcessW(executablePath.data(), mutableCommandLine.data(), nullptr, nullptr, FALSE,
+		                    0, nullptr, nullptr, &startupInfo, &processInfo)) {
+			error = spades::Format("CreateProcessW failed with error {0}", GetLastError());
+			return false;
+		}
+
+		CloseHandle(processInfo.hThread);
+		CloseHandle(processInfo.hProcess);
+		return true;
+#else
+		std::vector<char *> launchArguments;
+		launchArguments.reserve(static_cast<size_t>(argc) + 2);
+		for (int i = 0; i < argc; ++i)
+			launchArguments.push_back(argv[i]);
+		char restartArgument[] = "--mod-restart";
+		if (!g_modRestartLaunch)
+			launchArguments.push_back(restartArgument);
+		launchArguments.push_back(nullptr);
+
+		fflush(nullptr);
+		execvp(launchArguments[0], launchArguments.data());
+		error = spades::Format("execvp failed: {0}", std::string(std::strerror(errno)));
+		return false;
+#endif
 	}
 } // namespace
 
@@ -246,6 +308,11 @@ namespace {
 
 namespace spades {
 	std::string g_userResourceDirectory;
+
+	void RequestApplicationRestart() {
+		g_restartRequested = true;
+		SPLog("A clean restart was requested to apply the user mod selection");
+	}
 
 	std::vector<std::string> GetAvailableUserMods() {
 		std::vector<std::string> mods;
@@ -415,6 +482,7 @@ int main(int argc, char **argv) {
 	}
 
 	std::unique_ptr<spades::SplashWindow> splashWindow;
+	bool cleanShutdownCompleted = false;
 
 	try {
 
@@ -718,17 +786,19 @@ int main(int argc, char **argv) {
 
 		SDL_InitSubSystem(SDL_INIT_VIDEO);
 
-		// we want to show splash window at least for some time...
+		// We normally keep the splash visible long enough to be readable. A mod restart has
+		// already shown the UI and should return to it as quickly as initialization allows.
 		pumpEvents();
 		auto ticks = SDL_GetTicks();
-		if (ticks < showSplashWindowTime + 1500) {
+		if (!g_modRestartLaunch && ticks < showSplashWindowTime + 1500) {
 			SDL_Delay(showSplashWindowTime + 1500 - ticks);
 		}
 		pumpEvents();
 
 		// everything is now ready!
 		if (!g_autoconnect) {
-			if (!((int)cl_showStartupWindow != 0 || splashWindow->IsStartupScreenRequested())) {
+			if (g_modRestartLaunch ||
+			    !((int)cl_showStartupWindow != 0 || splashWindow->IsStartupScreenRequested())) {
 				splashWindow.reset();
 
 				SPLog("Starting main screen");
@@ -748,7 +818,12 @@ int main(int argc, char **argv) {
 
 		spades::Settings::GetInstance()->Flush();
 
+		if (g_restartRequested) {
+			SPLog("Closing application resources before relaunching to apply the user mod");
+			spades::CloseLog();
+		}
 		spades::FileManager::Close();
+		cleanShutdownCompleted = true;
 	} catch (const spades::ExitRequestException &) {
 		// user changed his/her mind.
 	} catch (const std::exception &ex) {
@@ -772,6 +847,21 @@ int main(int argc, char **argv) {
 		                             nullptr)) {
 			// showing dialog failed.
 			// TODO: do appropriate action
+		}
+	}
+
+	if (g_restartRequested && cleanShutdownCompleted) {
+		std::string error;
+		if (!RelaunchApplication(argc, argv, error)) {
+			fprintf(stderr, "OpenSpades could not restart automatically: %s\n", error.c_str());
+			std::string message = spades::Format(
+			  "OpenSpades could not restart automatically. Please start it manually to apply "
+			  "the selected mod.\n\n{0}",
+			  error);
+			SDL_InitSubSystem(SDL_INIT_VIDEO);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenSpades Restart Failed",
+			                         message.c_str(), nullptr);
+			return 1;
 		}
 	}
 

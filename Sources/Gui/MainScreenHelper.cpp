@@ -409,6 +409,8 @@ namespace spades {
 			return SetActiveUserMod(name);
 		}
 
+		void MainScreenHelper::RestartForModChange() { mainScreen->RequestRestart(); }
+
 		PackageUpdateManager &MainScreenHelper::GetPackageUpdateManager() {
 			return PackageUpdateManager::GetInstance();
 		}

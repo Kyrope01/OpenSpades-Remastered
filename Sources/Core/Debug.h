@@ -82,6 +82,8 @@ namespace spades {
 		std::string BacktraceRecordToString(const BacktraceRecord &);
 	} // namespace reflection
 	void StartLog();
+	/** Flushes and closes the file log before replacing the current process image. */
+	void CloseLog();
 
 	void LogMessage(const char *file, int line, const char *format, ...)
 #ifdef __GNUC__
