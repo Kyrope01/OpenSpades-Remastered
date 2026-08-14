@@ -85,7 +85,7 @@ namespace spades {
         }
     }
 
-    /** Dark, thin-bordered panel used by the remastered menu layout. */
+    /** Dark, thin-bordered panel used by the main menu layout. */
     class MainScreenPanel : spades::ui::UIElement {
         Vector4 FillColor = Vector4(0.018f, 0.018f, 0.018f, 0.82f);
         Vector4 BorderColor = Vector4(0.76f, 0.76f, 0.76f, 0.42f);

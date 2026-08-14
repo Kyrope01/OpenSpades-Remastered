@@ -792,28 +792,18 @@ namespace spades {
             nameField.MaxLength = 15;
             nameField.DenyNonAscii = true;
 
-            layouter.AddHeading(_Tr("Preferences", "Remastered Features"));
-            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
-                                    ConfigNumberFormatter(0, " deg"));
-            layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
-            // Damage Numbers is a normal on/off feature in this client. Migrate the old
-            // grenade-inclusive value so the retained two-button setting always has a selected
-            // state.
-            if (cg_damageIndicators.IntValue > 1)
-                cg_damageIndicators = 1;
-            layouter.AddToggleField(_Tr("Preferences", "Damage Numbers"), "cg_damageIndicators");
-            layouter.AddSliderField(_Tr("Preferences", "Tracer Light Intensity"),
-                                    "cg_tracerLightIntensity", 0, 4, 0.1,
-                                    ConfigNumberFormatter(1, "x"));
-            layouter.AddToggleField(_Tr("Preferences", "Filmic Tonemapping"),
-                                    "r_filmicToneMapping");
-
             layouter.AddHeading(_Tr("Preferences", "Effects"));
             layouter.AddToggleField(_Tr("Preferences", "Blood"), "cg_blood");
             layouter.AddToggleField(_Tr("Preferences", "Terrain Blood Marks"), "cg_bloodMarks");
             layouter.AddToggleField(_Tr("Preferences", "Ejecting Brass"), "cg_ejectBrass");
             layouter.AddToggleField(_Tr("Preferences", "Ragdoll"), "cg_ragdoll");
             layouter.AddToggleField(_Tr("Preferences", "Animations"), "cg_animations");
+            layouter.AddToggleField(_Tr("Preferences", "Glowing Tracers"), "cg_glowingTracers");
+            layouter.AddSliderField(_Tr("Preferences", "Tracer Light Intensity"),
+                                    "cg_tracerLightIntensity", 0, 4, 0.1,
+                                    ConfigNumberFormatter(1, "x"));
+            layouter.AddToggleField(_Tr("Preferences", "Filmic Tonemapping"),
+                                    "r_filmicToneMapping");
             layouter.AddChoiceField(_Tr("Preferences", "Camera Shake"), "cg_shake",
                                     array<string> = {_Tr("Preferences", "MORE"),
                                                      _Tr("Preferences", "NORMAL"),
@@ -828,6 +818,12 @@ namespace spades {
             layouter.AddHeading(_Tr("Preferences", "Feedbacks"));
             layouter.AddToggleField(_Tr("Preferences", "Chat Notify Sounds"), "cg_chatBeep");
             layouter.AddToggleField(_Tr("Preferences", "Hit Indicator"), "cg_hitIndicator");
+            // Damage Numbers is a normal on/off feature in this client. Migrate the old
+            // grenade-inclusive value so the retained two-button setting always has a selected
+            // state.
+            if (cg_damageIndicators.IntValue > 1)
+                cg_damageIndicators = 1;
+            layouter.AddToggleField(_Tr("Preferences", "Damage Numbers"), "cg_damageIndicators");
             layouter.AddToggleField(_Tr("Preferences", "Show Alerts"), "cg_alerts");
 
             layouter.AddHeading(_Tr("Preferences", "AoS 0.75/0.76 Compatibility"));
@@ -835,6 +831,8 @@ namespace spades {
             layouter.AddToggleField(_Tr("Preferences", "Server Alert"), "cg_serverAlert");
 
             layouter.AddHeading(_Tr("Preferences", "Misc"));
+            layouter.AddSliderField(_Tr("Preferences", "Field of View"), "cg_fov", 45, 130, 1,
+                                    ConfigNumberFormatter(0, " deg"));
             layouter.AddSliderField(_Tr("Preferences", "Minimap size"), "cg_minimapSize", 128, 256,
                                     8, ConfigNumberFormatter(0, " px"));
             layouter.AddToggleField(_Tr("Preferences", "Show Statistics"), "cg_stats");
