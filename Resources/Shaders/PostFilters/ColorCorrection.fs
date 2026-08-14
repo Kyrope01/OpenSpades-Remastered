@@ -101,10 +101,20 @@ void main() {
 		//
 		//    r_sharp = 1 + localSharpening
 
-		// Sharpening is done by reversing the effect of the blur kernel.
-		// Clamp the lower bound to suppress the black edges around specular highlights.
+		// Sharpening is done by reversing the effect of the blur kernel. A plain
+		// unsharp mask overshoots on both sides of a high-contrast silhouette,
+		// producing the bright/dark object halos that sharpening is meant to avoid.
+		// Keep low-contrast detail enhancement, but smoothly reject an adjustment
+		// once it is large enough to become a visible outline. This uses the samples
+		// already fetched for the blur and therefore adds no texture lookups.
+		vec3 detail = gl_FragColor.xyz - blurred.xyz;
+		float detailMagnitude =
+		  max(max(abs(detail.x), abs(detail.y)), abs(detail.z)) * localSharpening;
+		float antiHalo = 1.0 - smoothstep(0.005, 0.03, detailMagnitude);
+
+		// Clamp the lower bound as a final safeguard for very dark highlights.
 		vec3 lowerBound = gl_FragColor.xyz * 0.6;
-		gl_FragColor.xyz += (gl_FragColor.xyz - blurred.xyz) * localSharpening;
+		gl_FragColor.xyz += detail * localSharpening * antiHalo;
 		gl_FragColor.xyz = max(gl_FragColor.xyz, lowerBound);
 	}
 

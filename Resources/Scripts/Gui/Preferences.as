@@ -945,6 +945,8 @@ namespace spades {
                                     ConfigNumberFormatter(0, " deg"));
             layouter.AddToggleField(_Tr("Preferences", "Filmic Tonemapping"),
                                     "r_filmicToneMapping");
+            layouter.AddSliderField(_Tr("Preferences", "Sharpening"), "r_sharpen", 0, 1, 0.1,
+                                    ConfigNumberFormatter(1, ""));
 
             layouter.AddHeading(_Tr("Preferences", "Visual Effects"));
             layouter.AddToggleField(_Tr("Preferences", "Blood"), "cg_blood");
